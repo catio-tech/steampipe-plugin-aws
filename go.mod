@@ -8,7 +8,6 @@ require (
 	github.com/aws/aws-sdk-go v1.51.19
 	github.com/aws/aws-sdk-go-v2 v1.27.0
 	github.com/aws/aws-sdk-go-v2/config v1.27.16
-	github.com/aws/aws-sdk-go-v2/credentials v1.17.16
 	github.com/aws/aws-sdk-go-v2/feature/s3/manager v1.16.21
 	github.com/aws/aws-sdk-go-v2/service/accessanalyzer v1.29.1
 	github.com/aws/aws-sdk-go-v2/service/account v1.16.4
@@ -147,6 +146,7 @@ require (
 require golang.org/x/xerrors v0.0.0-20220907171357-04be3eba64a2 // indirect
 
 require (
+	github.com/aws/aws-sdk-go-v2/credentials v1.17.16 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.47.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.47.0 // indirect

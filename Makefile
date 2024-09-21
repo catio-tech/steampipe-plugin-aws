@@ -6,3 +6,6 @@ install: build
 
 build:
 	go build -o ~/.steampipe/plugins/local/aws/aws.plugin *.go
+
+docker:
+	docker build --no-cache --progress=plain -t steampipe-plugin-aws .
