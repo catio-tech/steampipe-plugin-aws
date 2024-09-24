@@ -1,5 +1,4 @@
-# Dockerfile for extractor-steampipe
-
+# Stage 1: Build the Go binary
 FROM golang:1.22-alpine AS builder
 
 # Install Git and wget for dependency management
@@ -9,10 +8,22 @@ RUN apk update && \
 
 WORKDIR /app
 
-# COPY all files and kick of build
+# Copy source code into the container
 COPY . .
-RUN go build -o /app/aws.plugin ./
+
+# Build the Go binary
+RUN go build -o aws.plugin ./
+
+# Stage 2: Prepare the final runtime image
+FROM alpine:3.18
 
 # Create necessary directories and set permissions for the non-root user
-RUN mkdir -p /home/steampipe/.steampipe/plugins
-COPY /app/aws.plugin /home/steampipe/.steampipe/plugins/local/aws/aws.plugin
+RUN mkdir -p /home/steampipe/.steampipe/plugins/local/aws
+
+WORKDIR /home/steampipe
+
+# Copy the built plugin from the builder stage
+COPY --from=builder /app/aws.plugin /home/steampipe/.steampipe/plugins/local/aws
+
+# Optionally run a check to ensure the file is present
+RUN ls -la /home/steampipe/.steampipe/plugins/local/aws
