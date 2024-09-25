@@ -20,10 +20,5 @@ FROM alpine:3.18
 # Create necessary directories and set permissions for the non-root user
 RUN mkdir -p /home/steampipe/.steampipe/plugins/local/aws
 
-WORKDIR /home/steampipe
-
 # Copy the built plugin from the builder stage
 COPY --from=builder /app/aws.plugin /home/steampipe/.steampipe/plugins/local/aws
-
-# Optionally run a check to ensure the file is present
-RUN ls -la /home/steampipe/.steampipe/plugins/local/aws

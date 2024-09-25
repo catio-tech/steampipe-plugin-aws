@@ -16,26 +16,57 @@ permissions:
   contents: read
 
 jobs:
-  build-and-publish:
+  # Build step: Runs on every pull request
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - name: Set Git Commit SHA
-        id: vars
-        run: echo "GIT_COMMIT_SHA=$(echo $GITHUB_SHA | cut -c1-7)" >> $GITHUB_ENV
-      - name: Build steampipe-plugin-aws docker image
+
+      - name: Build Docker image
         run: |
-          docker builder prune -f
-          docker build . --file Dockerfile --no-cache --progress=plain --tag ${{ env.REPO_NAME }}:${{ env.GIT_COMMIT_SHA }}
-      - name: Tag steampipe-plugin-aws docker image
-        run: docker tag ${{ env.REPO_NAME }}:${{ env.GIT_COMMIT_SHA }} ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.us-west-2.amazonaws.com/${{ env.REPO_NAME }}:${{ env.GIT_COMMIT_SHA }}
+          docker build . --file Dockerfile --no-cache --progress=plain --tag ${{ env.REPO_NAME }}:latest
+
+      - name: Save Docker image as a tar file
+        run: |
+          docker save -o steampipe-plugin-aws.tar ${{ env.REPO_NAME }}:latest
+
+      - name: Upload Docker image as an artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: steampipe-plugin-aws-image
+          path: steampipe-plugin-aws.tar
+
+  # Publish step: Runs only on push to main branch
+  publish:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Download Docker image artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: steampipe-plugin-aws-image
+
+      - name: Load Docker image from tar file
+        run: |
+          docker load -i steampipe-plugin-aws.tar
+
+      - name: Tag Docker image for AWS ECR
+        run: |
+          docker tag ${{ env.REPO_NAME }}:latest ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.us-west-2.amazonaws.com/${{ env.REPO_NAME }}:latest
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/GitHubAction-AssumeRoleWithAction
           role-session-name: GitHub_to_AWS_via_FederatedOIDC
           aws-region: ${{ env.AWS_REGION }}
+
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
-      - name: Push images to ECR
-        run: docker push ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.us-west-2.amazonaws.com/${{ env.REPO_NAME }}:${{ env.GIT_COMMIT_SHA }}
+
+      - name: Push Docker image to ECR
+        run: |
+          docker push ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.us-west-2.amazonaws.com/${{ env.REPO_NAME }}:latest
