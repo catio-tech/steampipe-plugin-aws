@@ -18,7 +18,10 @@ RUN go build -o aws.plugin ./
 FROM alpine:3.18
 
 # Create necessary directories and set permissions for the non-root user
-RUN mkdir -p /home/steampipe/.steampipe/plugins/local/aws
+RUN mkdir -p /home/steampipe/.steampipe/plugins/local/aws && \
+    mkdir -p /home/steampipe/.aws
+COPY config/aws.spc /home/steampipe/.steampipe/config/aws.spc
+COPY config/aws.config /home/steampipe/.aws/config
 
 # Copy the built plugin from the builder stage
 COPY --from=builder /app/aws.plugin /home/steampipe/.steampipe/plugins/local/aws
