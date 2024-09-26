@@ -16,6 +16,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws/retry"
 	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/accessanalyzer"
 	"github.com/aws/aws-sdk-go-v2/service/account"
 	"github.com/aws/aws-sdk-go-v2/service/acm"
@@ -2056,7 +2057,7 @@ func getBaseClientForAccountUncached(ctx context.Context, d *plugin.QueryData, h
 
 	plugin.Logger(ctx).Debug("getBaseClientForAccountUncached", "connection_name", d.Connection.Name, "status", "starting")
 
-	//awsSpcConfig := GetConfig(d.Connection)
+	awsSpcConfig := GetConfig(d.Connection)
 
 	var configOptions []func(*config.LoadOptions) error
 
@@ -2066,65 +2067,65 @@ func getBaseClientForAccountUncached(ctx context.Context, d *plugin.QueryData, h
 	// important, as this base client is even used when trying to guess the
 	// default region for the user based on these settings.
 
-	//if awsSpcConfig.Profile != nil {
-	//	profile := aws.ToString(awsSpcConfig.Profile)
-	//	plugin.Logger(ctx).Debug("getBaseClientForAccountUncached", "connection_name", d.Connection.Name, "status", "profile_found", "profile", profile)
-	//	configOptions = append(configOptions, config.WithSharedConfigProfile(profile))
-	//}
+	if awsSpcConfig.Profile != nil {
+		profile := aws.ToString(awsSpcConfig.Profile)
+		plugin.Logger(ctx).Debug("getBaseClientForAccountUncached", "connection_name", d.Connection.Name, "status", "profile_found", "profile", profile)
+		configOptions = append(configOptions, config.WithSharedConfigProfile(profile))
+	}
 
-	//if awsSpcConfig.AccessKey != nil && awsSpcConfig.SecretKey == nil {
-	//	return nil, fmt.Errorf("partial credentials found in connection config, missing: secret_key")
-	//} else if awsSpcConfig.SecretKey != nil && awsSpcConfig.AccessKey == nil {
-	//	return nil, fmt.Errorf("partial credentials found in connection config, missing: access_key")
-	//} else if awsSpcConfig.AccessKey != nil && awsSpcConfig.SecretKey != nil {
-	//	plugin.Logger(ctx).Debug("getBaseClientForAccountUncached", "connection_name", d.Connection.Name, "status", "key_pair_found")
-	//	sessionToken := ""
-	//	if awsSpcConfig.SessionToken != nil {
-	//		plugin.Logger(ctx).Debug("getBaseClientForAccountUncached", "connection_name", d.Connection.Name, "status", "session_token_found")
-	//		sessionToken = *awsSpcConfig.SessionToken
-	//	}
-	//	provider := credentials.NewStaticCredentialsProvider(*awsSpcConfig.AccessKey, *awsSpcConfig.SecretKey, sessionToken)
-	//	configOptions = append(configOptions, config.WithCredentialsProvider(provider))
-	//}
+	if awsSpcConfig.AccessKey != nil && awsSpcConfig.SecretKey == nil {
+		return nil, fmt.Errorf("partial credentials found in connection config, missing: secret_key")
+	} else if awsSpcConfig.SecretKey != nil && awsSpcConfig.AccessKey == nil {
+		return nil, fmt.Errorf("partial credentials found in connection config, missing: access_key")
+	} else if awsSpcConfig.AccessKey != nil && awsSpcConfig.SecretKey != nil {
+		plugin.Logger(ctx).Debug("getBaseClientForAccountUncached", "connection_name", d.Connection.Name, "status", "key_pair_found")
+		sessionToken := ""
+		if awsSpcConfig.SessionToken != nil {
+			plugin.Logger(ctx).Debug("getBaseClientForAccountUncached", "connection_name", d.Connection.Name, "status", "session_token_found")
+			sessionToken = *awsSpcConfig.SessionToken
+		}
+		provider := credentials.NewStaticCredentialsProvider(*awsSpcConfig.AccessKey, *awsSpcConfig.SecretKey, sessionToken)
+		configOptions = append(configOptions, config.WithCredentialsProvider(provider))
+	}
+
+	plugin.Logger(ctx).Debug("getBaseClientForAccountUncached", "connection_name", d.Connection.Name, "status", "loading_config")
+	if plugin.Logger(ctx).GetLevel() <= hclog.Debug {
+		logger := plugin.Logger(ctx)
+		configOptions = append(configOptions, config.WithLogger(NewHCLoggerToSmithyLoggerWrapper(&logger)))
+		configOptions = append(configOptions, config.WithClientLogMode(aws.LogRetries))
+	}
+
+	// NOTE: EC2 metadata service IMDS throttling and retries
 	//
-	//plugin.Logger(ctx).Debug("getBaseClientForAccountUncached", "connection_name", d.Connection.Name, "status", "loading_config")
-	//if plugin.Logger(ctx).GetLevel() <= hclog.Debug {
-	//	logger := plugin.Logger(ctx)
-	//	configOptions = append(configOptions, config.WithLogger(NewHCLoggerToSmithyLoggerWrapper(&logger)))
-	//	configOptions = append(configOptions, config.WithClientLogMode(aws.LogRetries))
-	//}
+	// With a large number of connections all being setup on a single machine using
+	// IMDS credentials, we can hit the IMDS throttling limits. We only query IMDS
+	// once per connection (3 API calls under the hood), but it still throttles once
+	// over 200 connections or so (estimate, rate limits vary).
 	//
-	//// NOTE: EC2 metadata service IMDS throttling and retries
-	////
-	//// With a large number of connections all being setup on a single machine using
-	//// IMDS credentials, we can hit the IMDS throttling limits. We only query IMDS
-	//// once per connection (3 API calls under the hood), but it still throttles once
-	//// over 200 connections or so (estimate, rate limits vary).
-	////
-	//// I was unable to find a way to setup automatic retries and the information
-	//// available online as of 2023-01-26 is limited. Best links I could find:
-	//// * IDMS service - https://pkg.go.dev/github.com/aws/aws-sdk-go-v2/feature/ec2/imds#pkg-overview
-	//// * (Broken) example with ec2rolecreds - https://pkg.go.dev/github.com/aws/aws-sdk-go-v2/credentials/ec2rolecreds#Provider
-	//// * (Fixed) issue that it didn't work - https://github.com/aws/aws-sdk-go-v2/issues/1296
-	////
-	//// // This code ran, but didn't seem to respect the idms.Options{...}
-	//// // The debugHTTPClient did work to show requests / throttling.
-	//// retryer := retry.NewStandard(func(o *retry.StandardOptions) {
-	////   // reseting state of rand to generate different random values
-	////   rand.Seed(time.Now().UnixNano())
-	////   o.MaxAttempts = 50
-	////   o.MaxBackoff = 5 * time.Minute
-	////   o.RateLimiter = NoOpRateLimit{} // With no rate limiter
-	////   o.Backoff = NewExponentialJitterBackoff(100*time.Millisecond, 5)
-	////   log.Printf("[WARN] retryer!")
-	//// })
-	//// configOptions = append(configOptions, config.WithEC2RoleCredentialOptions(func(opts *ec2rolecreds.Options) {
-	////   // debugHTTPClient per https://github.com/aws/aws-sdk-go-v2/issues/1296
-	////   opts.Client = imds.New(imds.Options{Retryer: retryer, ClientLogMode: aws.LogRetries | aws.LogRequest}, withDebugHTTPClient())
-	//// }))
+	// I was unable to find a way to setup automatic retries and the information
+	// available online as of 2023-01-26 is limited. Best links I could find:
+	// * IDMS service - https://pkg.go.dev/github.com/aws/aws-sdk-go-v2/feature/ec2/imds#pkg-overview
+	// * (Broken) example with ec2rolecreds - https://pkg.go.dev/github.com/aws/aws-sdk-go-v2/credentials/ec2rolecreds#Provider
+	// * (Fixed) issue that it didn't work - https://github.com/aws/aws-sdk-go-v2/issues/1296
 	//
-	//configOptions = append(configOptions, config.WithHTTPClient(sharedHTTPClient))
-	configOptions = append(configOptions, config.WithRegion("us-west-2"))
+	// // This code ran, but didn't seem to respect the idms.Options{...}
+	// // The debugHTTPClient did work to show requests / throttling.
+	// retryer := retry.NewStandard(func(o *retry.StandardOptions) {
+	//   // reseting state of rand to generate different random values
+	//   rand.Seed(time.Now().UnixNano())
+	//   o.MaxAttempts = 50
+	//   o.MaxBackoff = 5 * time.Minute
+	//   o.RateLimiter = NoOpRateLimit{} // With no rate limiter
+	//   o.Backoff = NewExponentialJitterBackoff(100*time.Millisecond, 5)
+	//   log.Printf("[WARN] retryer!")
+	// })
+	// configOptions = append(configOptions, config.WithEC2RoleCredentialOptions(func(opts *ec2rolecreds.Options) {
+	//   // debugHTTPClient per https://github.com/aws/aws-sdk-go-v2/issues/1296
+	//   opts.Client = imds.New(imds.Options{Retryer: retryer, ClientLogMode: aws.LogRetries | aws.LogRequest}, withDebugHTTPClient())
+	// }))
+
+	configOptions = append(configOptions, config.WithHTTPClient(sharedHTTPClient))
+	//configOptions = append(configOptions, config.WithRegion("us-west-2"))
 	cfg, err := config.LoadDefaultConfig(ctx, configOptions...)
 	if err != nil {
 		plugin.Logger(ctx).Error("getBaseClientForAccountUncached", "connection_name", d.Connection.Name, "load_default_config_error", err)
@@ -2138,21 +2139,21 @@ func getBaseClientForAccountUncached(ctx context.Context, d *plugin.QueryData, h
 	// API calls for IAM role authentication; if it's not set here, a signing
 	// error is thrown for API calls with this client, e.g.,
 	// Error: operation error CloudFront: ListDistributions, failed to sign request: failed to retrieve credentials: failed to refresh cached credentials, operation error STS: AssumeRole, failed to resolve service endpoint, an AWS region is required, but was not found
-	//if cfg.Region == "" {
-	//	defaultRegion, err := getDefaultRegionFromConfig(ctx, d, nil)
-	//	if err != nil {
-	//		plugin.Logger(ctx).Error("getBaseClientForAccountUncached", "connection_name", d.Connection.Name, "get_default_region_error", err)
-	//		return nil, err
-	//	}
+	if cfg.Region == "" {
+		defaultRegion, err := getDefaultRegionFromConfig(ctx, d, nil)
+		if err != nil {
+			plugin.Logger(ctx).Error("getBaseClientForAccountUncached", "connection_name", d.Connection.Name, "get_default_region_error", err)
+			return nil, err
+		}
 
-	//plugin.Logger(ctx).Debug("getBaseClientForAccountUncached", "connection_name", d.Connection.Name, "region", defaultRegion, "status", "set_default_region")
-	//configOptions = append(configOptions, config.WithRegion(defaultRegion))
-	cfg, err = config.LoadDefaultConfig(ctx, configOptions...)
-	if err != nil {
-		plugin.Logger(ctx).Error("getBaseClientForAccountUncached", "connection_name", d.Connection.Name, "load_default_config_error", err)
-		return nil, err
+		plugin.Logger(ctx).Debug("getBaseClientForAccountUncached", "connection_name", d.Connection.Name, "region", defaultRegion, "status", "set_default_region")
+		configOptions = append(configOptions, config.WithRegion(defaultRegion))
+		cfg, err = config.LoadDefaultConfig(ctx, configOptions...)
+		if err != nil {
+			plugin.Logger(ctx).Error("getBaseClientForAccountUncached", "connection_name", d.Connection.Name, "load_default_config_error", err)
+			return nil, err
+		}
 	}
-	//}
 
 	plugin.Logger(ctx).Debug("getBaseClientForAccountUncached", "connection_name", d.Connection.Name, "status", "done")
 
