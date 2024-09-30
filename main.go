@@ -2,14 +2,21 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/turbot/steampipe-plugin-aws/aws"
 	"github.com/turbot/steampipe-plugin-sdk/v5/plugin"
+	"log"
 	"os/exec"
 	"strings"
 )
 
 func main() {
+	// Print the current caller identity
+	printCurrentCallerIdentity()
+
 	if running, err := checkIfPluginRunning("aws.plugin"); err != nil {
 		fmt.Println("Error checking if plugin is running:", err)
 	} else if running {
@@ -19,6 +26,22 @@ func main() {
 
 	plugin.Serve(&plugin.ServeOpts{
 		PluginFunc: aws.Plugin})
+}
+
+func printCurrentCallerIdentity() {
+	// use sts client to get caller identity
+	cfg, err := config.LoadDefaultConfig(context.TODO())
+	if err != nil {
+		log.Fatalf("Failed to load AWS configuration: %v", err)
+	}
+
+	// Create an STS client from just the config
+	svc := sts.NewFromConfig(cfg)
+	identity, err := svc.GetCallerIdentity(context.TODO(), &sts.GetCallerIdentityInput{})
+	if err != nil {
+		log.Println("Failed to get caller identity:", err)
+	}
+	log.Println("Caller Identity:", *identity.Account, *identity.Arn, *identity.UserId)
 }
 
 func checkIfPluginRunning(pluginName string) (bool, error) {
