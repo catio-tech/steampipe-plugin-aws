@@ -19,9 +19,9 @@ func main() {
 	printCurrentCallerIdentity(ctx)
 
 	if running, err := checkIfPluginRunning("aws.plugin"); err != nil {
-		plugin.Logger(ctx).Error("Error checking if plugin is running:", err)
+		fmt.Println("Error checking if plugin is running:", err)
 	} else if running {
-		plugin.Logger(ctx).Info("Plugin is already running")
+		fmt.Println("Plugin is already running")
 		return
 	}
 
@@ -33,7 +33,7 @@ func printCurrentCallerIdentity(ctx context.Context) {
 	// use sts client to get caller identity
 	cfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
-		plugin.Logger(ctx).Error("Failed to load AWS configuration: %v", err)
+		fmt.Println("Failed to load AWS configuration:", err)
 		return
 	}
 
@@ -41,9 +41,9 @@ func printCurrentCallerIdentity(ctx context.Context) {
 	svc := sts.NewFromConfig(cfg)
 	identity, err := svc.GetCallerIdentity(context.TODO(), &sts.GetCallerIdentityInput{})
 	if err != nil {
-		plugin.Logger(ctx).Error("Failed to get caller identity:", err)
+		fmt.Println("Failed to get caller identity:", err)
 	}
-	plugin.Logger(ctx).Info("Caller Identity:", *identity.Account, *identity.Arn, *identity.UserId)
+	fmt.Println("Caller Identity:", *identity.Account, *identity.Arn, *identity.UserId)
 }
 
 func checkIfPluginRunning(pluginName string) (bool, error) {
