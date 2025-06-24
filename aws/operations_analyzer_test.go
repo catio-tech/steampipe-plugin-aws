@@ -2,7 +2,11 @@ package aws
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
+	"sort"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -440,6 +444,72 @@ func TestAnalyzeBackupPlan(t *testing.T) {
 
 	// Fail the test if no operations were found
 	assert.NotEmpty(t, operations, "Expected to find at least one AWS operation for aws_backup_plan")
+}
+
+func TestAnalyzeQueriesFromJSON(t *testing.T) {
+	// Define a struct to match the JSON structure
+	type TestQuery struct {
+		RawSQL string `json:"raw_sql"`
+	}
+	type TestFile struct {
+		Queries []TestQuery `json:"queries"`
+	}
+
+	// Read the JSON file
+	file, err := os.ReadFile("/Users/aaron.verones/catio-tech/extractor-steampipe/steampipeExtractor/steampipe-hub/aws/aws_queries.json")
+	assert.NoError(t, err, "Should be able to read queries.json")
+
+	// Unmarshal the JSON data
+	var testData []TestFile
+	err = json.Unmarshal(file, &testData)
+	assert.NoError(t, err, "Should be able to unmarshal JSON")
+
+	// Use a map to collect unique operations across all queries
+	allOperations := make(map[string]struct{})
+
+	// Process each query from the file
+	for _, test := range testData {
+		for _, query := range test.Queries {
+			cleanedSQL := query.RawSQL
+			// If the query contains placeholders, we need to clean it up.
+			if strings.Contains(cleanedSQL, "{{") {
+				// First, remove the connection name placeholders.
+				cleanedSQL = strings.ReplaceAll(cleanedSQL, "{{.connectionName}}.", "")
+
+				// If other placeholders exist, they are likely in the WHERE clause.
+				// To avoid SQL syntax errors, we'll just remove the entire WHERE clause.
+				// This is a simplification, but it allows us to extract the table names.
+				if whereIndex := strings.LastIndex(strings.ToLower(cleanedSQL), " where "); whereIndex != -1 {
+					cleanedSQL = cleanedSQL[:whereIndex]
+				}
+			}
+
+			// Get the operations for the cleaned SQL
+			operations, err := GetAWSOperationsFromSQL(context.Background(), cleanedSQL)
+			assert.NoError(t, err, "GetAWSOperationsFromSQL should not fail for query: %s", cleanedSQL)
+
+			// Add the found operations to our set
+			for _, op := range operations {
+				allOperations[op] = struct{}{}
+			}
+		}
+	}
+
+	// Convert the set of operations to a sorted slice for consistent logging
+	var finalOps []string
+	for op := range allOperations {
+		finalOps = append(finalOps, op)
+	}
+	sort.Strings(finalOps)
+
+	// Log the final list of unique operations
+	t.Log("Discovered unique AWS Operations from all queries:")
+	for _, op := range finalOps {
+		t.Logf("- %s", op)
+	}
+
+	// Fail the test if no operations were discovered at all
+	assert.NotEmpty(t, finalOps, "Expected to find at least one AWS operation from the JSON file")
 }
 
 
