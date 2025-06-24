@@ -7,17 +7,46 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 
 	pg_query "github.com/pganalyze/pg_query_go/v6"
 	"github.com/turbot/steampipe-plugin-sdk/v5/plugin"
 )
 
-// listFuncToTableBuilder maps a list function's name to the function that builds its corresponding table.
-// This allows us to resolve ParentHydrate relationships programmatically.
-var listFuncToTableBuilder = map[string]func(context.Context) *plugin.Table{
-	"listWellArchitectedWorkloads":     tableAwsWellArchitectedWorkload,
-	"listWellArchitectedLenses":        tableAwsWellArchitectedLens,
-	// More parent hydrate functions can be registered here in the future.
+// PluginAnalysisTools holds the cached analysis data for the plugin.
+type PluginAnalysisTools struct {
+	tableMap           map[string]*plugin.Table
+	listFuncToTableMap map[string]*plugin.Table
+}
+
+var (
+	pluginTools *PluginAnalysisTools
+	once        sync.Once
+)
+
+// getPluginTools builds and caches a map of all list functions to their tables.
+// This allows for dynamic resolution of ParentHydrate dependencies at runtime.
+func getPluginTools(ctx context.Context) *PluginAnalysisTools {
+	once.Do(func() {
+		// Get the plugin's definition, which contains all table information.
+		p := Plugin(ctx)
+		listFuncMap := make(map[string]*plugin.Table)
+
+		// Iterate through every table in the plugin.
+		for _, table := range p.TableMap {
+			// If the table has a List function, map its name to the table definition.
+			if table.List != nil && table.List.Hydrate != nil {
+				funcName := getFunctionName(table.List.Hydrate)
+				listFuncMap[funcName] = table
+			}
+		}
+
+		pluginTools = &PluginAnalysisTools{
+			tableMap:           p.TableMap,
+			listFuncToTableMap: listFuncMap,
+		}
+	})
+	return pluginTools
 }
 
 // getFunctionName returns the short name of a function (e.g., "listWellArchitectedWorkloads").
@@ -71,8 +100,8 @@ func AnalyzeTableOperations(ctx context.Context, table *plugin.Table) ([]string,
 			// 3. ParentHydrate
 			if list.ParentHydrate != nil {
 				funcName := getFunctionName(list.ParentHydrate)
-				if builder, ok := listFuncToTableBuilder[funcName]; ok {
-					parentTable := builder(ctx)
+				tools := getPluginTools(ctx)
+				if parentTable, ok := tools.listFuncToTableMap[funcName]; ok {
 					queue = append(queue, parentTable)
 				}
 			}
@@ -114,15 +143,14 @@ func AnalyzeSQLQuery(ctx context.Context, sqlQuery string) (map[string][]string,
 
 	// Analyze each table to get its operations
 	for _, tableName := range tableNames {
-		// Get the table builder function
-		tableBuilder := getTableBuilderByName(tableName)
-		if tableBuilder == nil {
-			// Table not found in this plugin, skip it
+		// Get the table definition by its name.
+		table := getTableByName(ctx, tableName)
+		if table == nil {
+			// Table not found in this plugin, skip it.
 			continue
 		}
 
-		// Build the table and analyze its operations
-		table := tableBuilder(ctx)
+		// Analyze the table's operations.
 		operations, err := AnalyzeTableOperations(ctx, table)
 		if err != nil {
 			return nil, fmt.Errorf("failed to analyze operations for table %s: %w", tableName, err)
@@ -436,17 +464,10 @@ func extractTablesFromNode(node *pg_query.Node, tableSet map[string]struct{}) {
 	}
 }
 
-// getTableBuilderByName returns the table builder function for a given table name.
-// This maps table names to their corresponding builder functions.
-func getTableBuilderByName(tableName string) func(context.Context) *plugin.Table {
-	// Map of table names to their builder functions
-	// This would need to be expanded to include all AWS tables in the plugin
-	tableBuilders := map[string]func(context.Context) *plugin.Table{
-		"aws_wellarchitected_lens_review": tableAwsWellArchitectedLensReview,
-		"aws_wellarchitected_workload":    tableAwsWellArchitectedWorkload,
-		"aws_wellarchitected_lens":        tableAwsWellArchitectedLens,
-		// Add more table mappings here as needed
-	}
-
-	return tableBuilders[tableName]
-} 
+// getTableByName returns the table definition for a given table name by looking it
+// up in the plugin's table map.
+func getTableByName(ctx context.Context, tableName string) *plugin.Table {
+	tools := getPluginTools(ctx)
+	// The table map from the plugin uses lowercase keys.
+	return tools.tableMap[strings.ToLower(tableName)]
+}

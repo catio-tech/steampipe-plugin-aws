@@ -31,6 +31,28 @@ func TestAnalyzeWellArchitectedLensReview(t *testing.T) {
 	assert.ElementsMatch(t, expected, operations, "The discovered operations should match the expected list.")
 }
 
+func TestAnalyzeAccessAnalyzer(t *testing.T) {
+	table := tableAwsAccessAnalyzer(context.Background())
+
+	operations, err := AnalyzeTableOperations(context.Background(), table)
+	if err != nil {
+		t.Fatalf("AnalyzeTableOperations failed: %v", err)
+	}
+
+	fmt.Println("Discovered AWS Operations for aws_accessanalyzer_analyzer:")
+	for _, op := range operations {
+		fmt.Println("-", op)
+	}
+
+	expected := []string{
+		"access-analyzer:GetAnalyzer",
+		"access-analyzer:ListAnalyzers", 
+		"access-analyzer:ListFindings",
+	}
+
+	assert.ElementsMatch(t, expected, operations, "The discovered operations should match the expected list.")
+}
+
 func TestAnalyzeSQLQuery(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -166,6 +188,34 @@ func TestAnalyzeSQLQuery(t *testing.T) {
 				},
 			},
 		},
+		{
+			name:     "Access Analyzer table",
+			sqlQuery: "SELECT name, status, type FROM aws_accessanalyzer_analyzer WHERE type = 'ACCOUNT'",
+			expectedTables: []string{"aws_accessanalyzer_analyzer"},
+			expectedOps: map[string][]string{
+				"aws_accessanalyzer_analyzer": {
+					"access-analyzer:GetAnalyzer",
+					"access-analyzer:ListAnalyzers",
+					"access-analyzer:ListFindings",
+				},
+			},
+		},
+		{
+			name:     "Complex query with Access Analyzer and Well-Architected tables",
+			sqlQuery: "SELECT a.name as analyzer_name, w.workload_name FROM aws_accessanalyzer_analyzer a CROSS JOIN aws_wellarchitected_workload w WHERE a.status = 'ACTIVE'",
+			expectedTables: []string{"aws_accessanalyzer_analyzer", "aws_wellarchitected_workload"},
+			expectedOps: map[string][]string{
+				"aws_accessanalyzer_analyzer": {
+					"access-analyzer:GetAnalyzer",
+					"access-analyzer:ListAnalyzers",
+					"access-analyzer:ListFindings",
+				},
+				"aws_wellarchitected_workload": {
+					"wellarchitected:GetWorkload",
+					"wellarchitected:ListWorkloads",
+				},
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -197,7 +247,7 @@ func TestAnalyzeSQLQuery(t *testing.T) {
 	}
 }
 
-func TestExtractTableNames(t *testing.T) {
+func TestAnalyzeExtractTableNames(t *testing.T) {
 	tests := []struct {
 		name     string
 		sqlQuery string
@@ -254,7 +304,7 @@ func TestExtractTableNames(t *testing.T) {
 	}
 }
 
-func TestGetAWSOperationsFromSQL(t *testing.T) {
+func TestAnalyzeGetAWSOperationsFromSQL(t *testing.T) {
 	tests := []struct {
 		name         string
 		sqlQuery     string
@@ -305,6 +355,26 @@ func TestGetAWSOperationsFromSQL(t *testing.T) {
 			sqlQuery:    "SELECT * FROM aws_unknown_table",
 			expectedOps: []string{}, // Should return empty since table is not in mapping
 		},
+		{
+			name:     "Access Analyzer table",
+			sqlQuery: "SELECT name, status, type FROM aws_accessanalyzer_analyzer WHERE type = 'ACCOUNT'",
+			expectedOps: []string{
+				"access-analyzer:GetAnalyzer",
+				"access-analyzer:ListAnalyzers",
+				"access-analyzer:ListFindings",
+			},
+		},
+		{
+			name:     "Complex query with Access Analyzer and Well-Architected tables",
+			sqlQuery: "SELECT a.name as analyzer_name, w.workload_name FROM aws_accessanalyzer_analyzer a CROSS JOIN aws_wellarchitected_workload w WHERE a.status = 'ACTIVE'",
+			expectedOps: []string{
+				"access-analyzer:GetAnalyzer",
+				"access-analyzer:ListAnalyzers",
+				"access-analyzer:ListFindings",
+				"wellarchitected:GetWorkload",
+				"wellarchitected:ListWorkloads",
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -324,7 +394,7 @@ func TestGetAWSOperationsFromSQL(t *testing.T) {
 	}
 }
 
-func TestExampleGetAWSOperationsFromSQL(t *testing.T) {
+func TestAnalyzeExampleGetAWSOperationsFromSQL(t *testing.T) {
 	// Example: Analyze what AWS operations a complex query would trigger
 	query := `
 		WITH recent_workloads AS (
