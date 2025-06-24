@@ -1,0 +1,257 @@
+package aws
+
+import (
+	"context"
+	"fmt"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+)
+
+func TestAnalyzeWellArchitectedLensReview(t *testing.T) {
+	table := tableAwsWellArchitectedLensReview(context.Background())
+
+	operations, err := AnalyzeTableOperations(context.Background(), table)
+	if err != nil {
+		t.Fatalf("AnalyzeTableOperations failed: %v", err)
+	}
+
+	fmt.Println("Discovered AWS Operations for aws_wellarchitected_lens_review:")
+	for _, op := range operations {
+		fmt.Println("-", op)
+	}
+
+	expected := []string{
+		"wellarchitected:GetLensReview",
+		"wellarchitected:GetWorkload",
+		"wellarchitected:ListLensReviews",
+		"wellarchitected:ListWorkloads",
+	}
+
+	assert.ElementsMatch(t, expected, operations, "The discovered operations should match the expected list.")
+}
+
+func TestAnalyzeSQLQuery(t *testing.T) {
+	tests := []struct {
+		name           string
+		sqlQuery       string
+		expectedTables []string
+		expectedOps    map[string][]string
+	}{
+		{
+			name:           "Simple SELECT query",
+			sqlQuery:       "SELECT * FROM aws_wellarchitected_lens_review WHERE workload_id = 'test'",
+			expectedTables: []string{"aws_wellarchitected_lens_review"},
+			expectedOps: map[string][]string{
+				"aws_wellarchitected_lens_review": {
+					"wellarchitected:GetLensReview",
+					"wellarchitected:GetWorkload",
+					"wellarchitected:ListLensReviews",
+					"wellarchitected:ListWorkloads",
+				},
+			},
+		},
+		{
+			name:           "Query with schema prefix",
+			sqlQuery:       "SELECT * FROM aws.aws_wellarchitected_workload",
+			expectedTables: []string{"aws_wellarchitected_workload"},
+			expectedOps: map[string][]string{
+				"aws_wellarchitected_workload": {
+					"wellarchitected:GetWorkload",
+					"wellarchitected:ListWorkloads",
+				},
+			},
+		},
+		{
+			name:     "Query with JOIN",
+			sqlQuery: "SELECT w.workload_name, lr.lens_name FROM aws_wellarchitected_workload w JOIN aws_wellarchitected_lens_review lr ON w.workload_id = lr.workload_id",
+			expectedTables: []string{"aws_wellarchitected_lens_review", "aws_wellarchitected_workload"},
+			expectedOps: map[string][]string{
+				"aws_wellarchitected_workload": {
+					"wellarchitected:GetWorkload",
+					"wellarchitected:ListWorkloads",
+				},
+				"aws_wellarchitected_lens_review": {
+					"wellarchitected:GetLensReview",
+					"wellarchitected:GetWorkload",
+					"wellarchitected:ListLensReviews",
+					"wellarchitected:ListWorkloads",
+				},
+			},
+		},
+		{
+			name:           "Query with non-AWS table (should be filtered out)",
+			sqlQuery:       "SELECT * FROM aws_wellarchitected_workload w JOIN some_other_table t ON w.id = t.id",
+			expectedTables: []string{"aws_wellarchitected_workload"},
+			expectedOps: map[string][]string{
+				"aws_wellarchitected_workload": {
+					"wellarchitected:GetWorkload",
+					"wellarchitected:ListWorkloads",
+				},
+			},
+		},
+		{
+			name:           "Query with unknown AWS table (should be skipped)",
+			sqlQuery:       "SELECT * FROM aws_unknown_table",
+			expectedTables: []string{}, // No tables should be processed since aws_unknown_table is not in our mapping
+			expectedOps:    map[string][]string{},
+		},
+		{
+			name:     "Complex query with subquery",
+			sqlQuery: "SELECT * FROM aws_wellarchitected_workload WHERE workload_id IN (SELECT workload_id FROM aws_wellarchitected_lens_review WHERE lens_name = 'test')",
+			expectedTables: []string{"aws_wellarchitected_lens_review", "aws_wellarchitected_workload"},
+			expectedOps: map[string][]string{
+				"aws_wellarchitected_workload": {
+					"wellarchitected:GetWorkload",
+					"wellarchitected:ListWorkloads",
+				},
+				"aws_wellarchitected_lens_review": {
+					"wellarchitected:GetLensReview",
+					"wellarchitected:GetWorkload",
+					"wellarchitected:ListLensReviews",
+					"wellarchitected:ListWorkloads",
+				},
+			},
+		},
+		{
+			name:     "PostgreSQL CTE (Common Table Expression)",
+			sqlQuery: "WITH workload_data AS (SELECT workload_id, workload_name FROM aws_wellarchitected_workload WHERE workload_id = 'test') SELECT lr.* FROM aws_wellarchitected_lens_review lr JOIN workload_data wd ON lr.workload_id = wd.workload_id",
+			expectedTables: []string{"aws_wellarchitected_lens_review", "aws_wellarchitected_workload"},
+			expectedOps: map[string][]string{
+				"aws_wellarchitected_workload": {
+					"wellarchitected:GetWorkload",
+					"wellarchitected:ListWorkloads",
+				},
+				"aws_wellarchitected_lens_review": {
+					"wellarchitected:GetLensReview",
+					"wellarchitected:GetWorkload",
+					"wellarchitected:ListLensReviews",
+					"wellarchitected:ListWorkloads",
+				},
+			},
+		},
+		{
+			name:     "PostgreSQL advanced features (window functions, nested CTEs)",
+			sqlQuery: `
+				WITH RECURSIVE workload_hierarchy AS (
+					SELECT workload_id, workload_name, 1 as level 
+					FROM aws_wellarchitected_workload 
+					WHERE workload_id = 'root'
+					UNION ALL
+					SELECT w.workload_id, w.workload_name, wh.level + 1
+					FROM aws_wellarchitected_workload w
+					JOIN workload_hierarchy wh ON w.workload_id = wh.workload_id
+				),
+				lens_reviews_with_rank AS (
+					SELECT *, 
+						   ROW_NUMBER() OVER (PARTITION BY workload_id ORDER BY updated_at DESC) as rn
+					FROM aws_wellarchitected_lens_review
+				)
+				SELECT wh.workload_name, lr.lens_name, lr.rn
+				FROM workload_hierarchy wh
+				JOIN lens_reviews_with_rank lr ON wh.workload_id = lr.workload_id
+				WHERE lr.rn = 1
+			`,
+			expectedTables: []string{"aws_wellarchitected_lens_review", "aws_wellarchitected_workload"},
+			expectedOps: map[string][]string{
+				"aws_wellarchitected_workload": {
+					"wellarchitected:GetWorkload",
+					"wellarchitected:ListWorkloads",
+				},
+				"aws_wellarchitected_lens_review": {
+					"wellarchitected:GetLensReview",
+					"wellarchitected:GetWorkload",
+					"wellarchitected:ListLensReviews",
+					"wellarchitected:ListWorkloads",
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := AnalyzeSQLQuery(context.Background(), tt.sqlQuery)
+			assert.NoError(t, err, "AnalyzeSQLQuery should not return an error")
+
+			// Check that we got the expected number of tables
+			assert.Len(t, result, len(tt.expectedOps), "Should return the expected number of tables")
+
+			// Check each table's operations
+			for tableName, expectedOps := range tt.expectedOps {
+				actualOps, exists := result[tableName]
+				assert.True(t, exists, "Table %s should be in the result", tableName)
+				assert.ElementsMatch(t, expectedOps, actualOps, "Operations for table %s should match expected", tableName)
+			}
+
+			fmt.Printf("Test: %s\n", tt.name)
+			fmt.Printf("SQL: %s\n", tt.sqlQuery)
+			fmt.Printf("Result:\n")
+			for table, ops := range result {
+				fmt.Printf("  Table: %s\n", table)
+				for _, op := range ops {
+					fmt.Printf("    - %s\n", op)
+				}
+			}
+			fmt.Println()
+		})
+	}
+}
+
+func TestExtractTableNames(t *testing.T) {
+	tests := []struct {
+		name     string
+		sqlQuery string
+		expected []string
+	}{
+		{
+			name:     "Simple SELECT",
+			sqlQuery: "SELECT * FROM aws_s3_bucket",
+			expected: []string{"aws_s3_bucket"},
+		},
+		{
+			name:     "Multiple tables with JOIN",
+			sqlQuery: "SELECT * FROM aws_s3_bucket b JOIN aws_s3_object o ON b.name = o.bucket_name",
+			expected: []string{"aws_s3_bucket", "aws_s3_object"},
+		},
+		{
+			name:     "With schema prefix",
+			sqlQuery: "SELECT * FROM aws.aws_ec2_instance",
+			expected: []string{"aws_ec2_instance"},
+		},
+		{
+			name:     "Mixed case",
+			sqlQuery: "SELECT * FROM AWS_S3_BUCKET WHERE name = 'test'",
+			expected: []string{"aws_s3_bucket"},
+		},
+		{
+			name:     "Non-AWS table filtered out",
+			sqlQuery: "SELECT * FROM aws_s3_bucket b JOIN other_table o ON b.id = o.id",
+			expected: []string{"aws_s3_bucket"},
+		},
+		{
+			name:     "INSERT statement",
+			sqlQuery: "INSERT INTO aws_s3_bucket (name) VALUES ('test')",
+			expected: []string{"aws_s3_bucket"},
+		},
+		{
+			name:     "UPDATE statement",
+			sqlQuery: "UPDATE aws_s3_bucket SET versioning = true WHERE name = 'test'",
+			expected: []string{"aws_s3_bucket"},
+		},
+		{
+			name:     "DELETE statement",
+			sqlQuery: "DELETE FROM aws_s3_bucket WHERE name = 'test'",
+			expected: []string{"aws_s3_bucket"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := extractTableNames(tt.sqlQuery)
+			assert.NoError(t, err, "extractTableNames should not return an error")
+			assert.ElementsMatch(t, tt.expected, result, "Extracted table names should match expected")
+		})
+	}
+}
+
+
