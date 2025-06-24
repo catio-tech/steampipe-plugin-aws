@@ -427,4 +427,19 @@ func TestAnalyzeExampleGetAWSOperationsFromSQL(t *testing.T) {
 	// - wellarchitected:ListWorkloads
 }
 
+func TestAnalyzeBackupPlan(t *testing.T) {
+	sqlQuery := "SELECT * FROM aws_backup_plan"
+	operations, err := GetAWSOperationsFromSQL(context.Background(), sqlQuery)
+	assert.NoError(t, err, "GetAWSOperationsFromSQL should not return an error")
+
+	// Log the discovered operations for review
+	t.Log("Discovered AWS Operations for aws_backup_plan:")
+	for _, op := range operations {
+		t.Logf("- %s", op)
+	}
+
+	// Fail the test if no operations were found
+	assert.NotEmpty(t, operations, "Expected to find at least one AWS operation for aws_backup_plan")
+}
+
 
