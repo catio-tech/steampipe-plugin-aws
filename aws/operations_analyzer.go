@@ -134,6 +134,34 @@ func AnalyzeSQLQuery(ctx context.Context, sqlQuery string) (map[string][]string,
 	return result, nil
 }
 
+// GetAWSOperationsFromSQL takes a SQL query and returns a flat list of all unique AWS operations
+// that could be triggered by executing that query. This is a simplified version of AnalyzeSQLQuery
+// that returns just the operations without the table grouping.
+func GetAWSOperationsFromSQL(ctx context.Context, sqlQuery string) ([]string, error) {
+	// Get the detailed analysis
+	tableOperations, err := AnalyzeSQLQuery(ctx, sqlQuery)
+	if err != nil {
+		return nil, err
+	}
+
+	// Collect all unique operations
+	operationSet := make(map[string]struct{})
+	for _, operations := range tableOperations {
+		for _, operation := range operations {
+			operationSet[operation] = struct{}{}
+		}
+	}
+
+	// Convert to sorted slice
+	result := make([]string, 0, len(operationSet))
+	for operation := range operationSet {
+		result = append(result, operation)
+	}
+	sort.Strings(result)
+
+	return result, nil
+}
+
 // extractTableNames extracts table names from a SQL query using the PostgreSQL parser.
 // This provides proper PostgreSQL syntax parsing that handles complex queries, subqueries, and JOINs correctly.
 func extractTableNames(sqlQuery string) ([]string, error) {

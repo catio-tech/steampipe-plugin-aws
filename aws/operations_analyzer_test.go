@@ -254,4 +254,107 @@ func TestExtractTableNames(t *testing.T) {
 	}
 }
 
+func TestGetAWSOperationsFromSQL(t *testing.T) {
+	tests := []struct {
+		name         string
+		sqlQuery     string
+		expectedOps  []string
+	}{
+		{
+			name:     "Simple SELECT query",
+			sqlQuery: "SELECT * FROM aws_wellarchitected_lens_review WHERE workload_id = 'test'",
+			expectedOps: []string{
+				"wellarchitected:GetLensReview",
+				"wellarchitected:GetWorkload",
+				"wellarchitected:ListLensReviews",
+				"wellarchitected:ListWorkloads",
+			},
+		},
+		{
+			name:     "Query with JOIN - should deduplicate operations",
+			sqlQuery: "SELECT w.workload_name, lr.lens_name FROM aws_wellarchitected_workload w JOIN aws_wellarchitected_lens_review lr ON w.workload_id = lr.workload_id",
+			expectedOps: []string{
+				"wellarchitected:GetLensReview",
+				"wellarchitected:GetWorkload",
+				"wellarchitected:ListLensReviews", 
+				"wellarchitected:ListWorkloads",
+			},
+		},
+		{
+			name:     "Complex query with subquery",
+			sqlQuery: "SELECT * FROM aws_wellarchitected_workload WHERE workload_id IN (SELECT workload_id FROM aws_wellarchitected_lens_review WHERE lens_name = 'test')",
+			expectedOps: []string{
+				"wellarchitected:GetLensReview",
+				"wellarchitected:GetWorkload", 
+				"wellarchitected:ListLensReviews",
+				"wellarchitected:ListWorkloads",
+			},
+		},
+		{
+			name:     "PostgreSQL CTE",
+			sqlQuery: "WITH workload_data AS (SELECT workload_id, workload_name FROM aws_wellarchitected_workload WHERE workload_id = 'test') SELECT lr.* FROM aws_wellarchitected_lens_review lr JOIN workload_data wd ON lr.workload_id = wd.workload_id",
+			expectedOps: []string{
+				"wellarchitected:GetLensReview",
+				"wellarchitected:GetWorkload",
+				"wellarchitected:ListLensReviews",
+				"wellarchitected:ListWorkloads",
+			},
+		},
+		{
+			name:        "Query with unknown AWS table",
+			sqlQuery:    "SELECT * FROM aws_unknown_table",
+			expectedOps: []string{}, // Should return empty since table is not in mapping
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := GetAWSOperationsFromSQL(context.Background(), tt.sqlQuery)
+			assert.NoError(t, err, "GetAWSOperationsFromSQL should not return an error")
+			assert.ElementsMatch(t, tt.expectedOps, result, "Operations should match expected")
+
+			fmt.Printf("Test: %s\n", tt.name)
+			fmt.Printf("SQL: %s\n", tt.sqlQuery)
+			fmt.Printf("AWS Operations:\n")
+			for _, op := range result {
+				fmt.Printf("  - %s\n", op)
+			}
+			fmt.Println()
+		})
+	}
+}
+
+func TestExampleGetAWSOperationsFromSQL(t *testing.T) {
+	// Example: Analyze what AWS operations a complex query would trigger
+	query := `
+		WITH recent_workloads AS (
+			SELECT workload_id, workload_name 
+			FROM aws_wellarchitected_workload 
+			WHERE created_date > '2024-01-01'
+		)
+		SELECT rw.workload_name, lr.lens_name, lr.risk_counts
+		FROM recent_workloads rw
+		JOIN aws_wellarchitected_lens_review lr ON rw.workload_id = lr.workload_id
+		WHERE lr.lens_status = 'CURRENT'
+	`
+
+	operations, err := GetAWSOperationsFromSQL(context.Background(), query)
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		return
+	}
+
+	fmt.Println("AWS Operations that would be triggered:")
+	for _, op := range operations {
+		t.Logf("- %s\n", op)
+	}
+	
+	// Output:
+	// AWS Operations that would be triggered:
+	// - wellarchitected:GetLensReview
+	// - wellarchitected:GetWorkload
+	// - wellarchitected:ListLensReviews
+	// - wellarchitected:ListWorkloads
+}
+
 
