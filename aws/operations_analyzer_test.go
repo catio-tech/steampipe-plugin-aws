@@ -15,6 +15,8 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// This role is given ReadOnlyAccess and extractor-steampipe IAM policies.
+// SSO users must be allowed to assume this role.
 var steampipePrincipalArn = "arn:aws:iam::891377056770:role/aws-reserved/sso.amazonaws.com/AWSReservedSSO_SteampipeExtractorAccess_26fb207546e68215"
 
 // policySimulatorExceptions contains AWS operations that are not supported by the AWS Policy Simulator
