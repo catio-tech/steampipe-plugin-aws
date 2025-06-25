@@ -4,10 +4,20 @@ This is one of the two test tools that validate that our IAM policy allows all t
 
 ## Quickstart
 
+Run from the root directory of this project. Assumes you have the `extractor-steampipe` project cloned in a sibling directory. If not, change the `queryFile` path in `aws/operations_analyzer_test.go`
+
+Run only the tests that validate the queries from json:
+
 ```sh
 setDev
-cd steampipe-plugin-aws
 go test -v -run TestAnalyzeQueriesFromJSON ./aws
+```
+
+Run all the unit tests for the feature:
+
+```sh
+setDev
+go test -v -run TestAnalyze ./aws
 ```
 
 ## How It Works

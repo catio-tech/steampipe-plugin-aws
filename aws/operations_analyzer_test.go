@@ -19,6 +19,10 @@ import (
 // SSO users must be allowed to assume this role.
 var steampipePrincipalArn = "arn:aws:iam::891377056770:role/aws-reserved/sso.amazonaws.com/AWSReservedSSO_SteampipeExtractorAccess_26fb207546e68215"
 
+// Assumes the extractor-steampipe project is cloned in a sibling directory and this test
+// is run from the root directory.
+var queryFile = "../../extractor-steampipe/steampipeExtractor/steampipe-hub/aws/aws_queries.json"
+
 // policySimulatorExceptions contains AWS operations that are not supported by the AWS Policy Simulator
 var policySimulatorExceptions = []string{
 	"s3:HeadBucket",
@@ -483,7 +487,7 @@ func TestAnalyzeQueriesFromJSON(t *testing.T) {
 	}
 
 	// Read the JSON file
-	file, err := os.ReadFile("/Users/aaron.verones/catio-tech/extractor-steampipe/steampipeExtractor/steampipe-hub/aws/aws_queries.json")
+	file, err := os.ReadFile(queryFile)
 	assert.NoError(t, err, "Should be able to read queries.json")
 
 	// Unmarshal the JSON data
