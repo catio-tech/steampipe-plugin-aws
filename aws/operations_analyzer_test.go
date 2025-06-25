@@ -9,8 +9,33 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/iam"
+	"github.com/aws/aws-sdk-go-v2/service/iam/types"
 	"github.com/stretchr/testify/assert"
 )
+
+var steampipePrincipalArn = "arn:aws:iam::891377056770:role/aws-reserved/sso.amazonaws.com/AWSReservedSSO_SteampipeExtractorAccess_26fb207546e68215"
+
+// policySimulatorExceptions contains AWS operations that are not supported by the AWS Policy Simulator
+var policySimulatorExceptions = []string{
+	"s3:HeadBucket",
+	"apigateway:GetApi",
+	"apigateway:GetApis",
+	"apigateway:GetIntegration",
+	"apigateway:GetIntegrations",
+	"apigateway:GetMethod",
+	"apigateway:GetResources",
+	"apigateway:GetRestApi",
+	"apigateway:GetRestApis",
+	"apigateway:GetRoute",
+	"apigateway:GetRoutes",
+	"apigateway:GetUsagePlan",
+	"apigateway:GetUsagePlans",
+	"neptune:DescribeDBClusters",
+	"neptune:ListTagsForResource",
+	// Add more exceptions here as needed
+}
 
 func TestAnalyzeWellArchitectedLensReview(t *testing.T) {
 	table := tableAwsWellArchitectedLensReview(context.Background())
@@ -510,6 +535,95 @@ func TestAnalyzeQueriesFromJSON(t *testing.T) {
 
 	// Fail the test if no operations were discovered at all
 	assert.NotEmpty(t, finalOps, "Expected to find at least one AWS operation from the JSON file")
+
+	// Analyze if the current AWS session has permission to perform these operations
+	t.Log("\n--- Analyzing Session Permissions ---")
+
+	// Filter out exceptions before testing
+	var operationsToTest []string
+	var exceptedOperations []string
+	
+	exceptionMap := make(map[string]bool)
+	for _, exception := range policySimulatorExceptions {
+		exceptionMap[exception] = true
+	}
+	
+	for _, op := range finalOps {
+		if exceptionMap[op] {
+			exceptedOperations = append(exceptedOperations, op)
+		} else {
+			operationsToTest = append(operationsToTest, op)
+		}
+	}
+
+	if len(exceptedOperations) > 0 {
+		t.Logf("Skipping %d operations not supported by AWS Policy Simulator:", len(exceptedOperations))
+		for _, op := range exceptedOperations {
+			t.Logf("- %s", op)
+		}
+	}
+
+	if len(operationsToTest) == 0 {
+		t.Log("No operations to test after filtering exceptions.")
+		return
+	}
+
+	cfg, err := config.LoadDefaultConfig(context.Background())
+	if err != nil {
+		t.Logf("WARNING: Could not load AWS config, skipping permissions analysis. Error: %v", err)
+		return
+	}
+
+	t.Logf("Simulating permissions for role: %s", steampipePrincipalArn)
+
+	iamClient := iam.NewFromConfig(cfg)
+	var deniedActions []string
+	batchSize := 10
+
+	for i := 0; i < len(operationsToTest); i += batchSize {
+		end := i + batchSize
+		if end > len(operationsToTest) {
+			end = len(operationsToTest)
+		}
+		batch := operationsToTest[i:end]
+
+		simInput := &iam.SimulatePrincipalPolicyInput{
+			PolicySourceArn: &steampipePrincipalArn,
+			ActionNames:     batch,
+		}
+
+		simOutput, err := iamClient.SimulatePrincipalPolicy(context.Background(), simInput)
+		if err != nil {
+			t.Fatalf("Failed to simulate principal policy. Error: %v", err)
+		}
+
+		for _, result := range simOutput.EvaluationResults {
+			if result.EvalDecision != types.PolicyEvaluationDecisionTypeAllowed {
+				deniedMsg := fmt.Sprintf("Action: %s, Decision: %s", *result.EvalActionName, result.EvalDecision)
+				deniedActions = append(deniedActions, deniedMsg)
+			}
+		}
+	}
+
+	if len(deniedActions) > 0 {
+		t.Log("\nThe following operations are NOT ALLOWED for the current session:")
+		for _, msg := range deniedActions {
+			t.Logf("- %s", msg)
+		}
+		t.Fail()
+	} else {
+		t.Logf("\nAll discovered operations are allowed for %s", steampipePrincipalArn)
+	}
+
+	// Report exceptions at the end
+	if len(exceptedOperations) > 0 {
+		t.Log("\n--- Policy Simulator Exceptions ---")
+		t.Logf("The following %d operations were not tested because they are not supported by the AWS Policy Simulator:", len(exceptedOperations))
+		for _, op := range exceptedOperations {
+			t.Logf("- %s (not supported by policy simulator)", op)
+		}
+		t.Log("These operations may still be allowed or denied in practice, but cannot be verified through simulation.")
+	}
 }
 
 
