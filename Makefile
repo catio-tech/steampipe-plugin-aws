@@ -1,6 +1,5 @@
 STEAMPIPE_INSTALL_DIR ?= ~/.steampipe
 BUILD_TAGS = netgo
-AWS_ACCOUNT ?= "891377056770"
 GIT_COMMIT_SHA ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "dev")
 
 install:
