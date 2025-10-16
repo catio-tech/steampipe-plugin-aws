@@ -7,7 +7,7 @@ install:
 
 docker-build-steampipe:
 	@docker build \
-		--platform linux/arm64 \
+		--platform $(PLATFORM) \
 		-t local/steampipe:latest \
 		-f docker/steampipe/Dockerfile \
 		.
