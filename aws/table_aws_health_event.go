@@ -20,6 +20,7 @@ func tableAwsHealthEvent(_ context.Context) *plugin.Table {
 			Hydrate: listHealthEvents,
 			Tags:    map[string]string{"service": "health", "action": "DescribeEvents"},
 			KeyColumns: []*plugin.KeyColumn{
+				{Name: "actionability", Require: plugin.Optional},
 				{Name: "arn", Require: plugin.Optional},
 				{Name: "availability_zone", Require: plugin.Optional},
 				{Name: "end_time", Require: plugin.Optional},
@@ -33,6 +34,11 @@ func tableAwsHealthEvent(_ context.Context) *plugin.Table {
 		},
 		Columns: awsGlobalRegionColumns([]*plugin.Column{
 			{
+				Name:        "actionability",
+				Description: "The actionability classification of the HealthEvent. Possible values are ACTION_REQUIRED, ACTION_MAY_BE_REQUIRED, and INFORMATIONAL.",
+				Type:        proto.ColumnType_STRING,
+			},
+			{
 				Name:        "arn",
 				Description: "The Amazon Resource Name (ARN) of the HealthEvent.",
 				Type:        proto.ColumnType_STRING,
@@ -42,6 +48,13 @@ func tableAwsHealthEvent(_ context.Context) *plugin.Table {
 				Description: "The Amazon Web Services Region name of the event.",
 				Type:        proto.ColumnType_STRING,
 				Transform:   transform.FromField("Region"),
+			},
+			{
+				Name:        "description",
+				Description: "The description of the event.",
+				Type:        proto.ColumnType_STRING,
+				Hydrate:     getHealthEventDescription,
+				Transform:   transform.FromValue(),
 			},
 			{
 				Name:        "availability_zone",
@@ -163,12 +176,36 @@ func listHealthEvents(ctx context.Context, d *plugin.QueryData, h *plugin.Hydrat
 	return nil, err
 }
 
+func getHealthEventDescription(ctx context.Context, d *plugin.QueryData, h *plugin.HydrateData) (interface{}, error) {
+	event := h.Item.(types.Event)
+
+	// Create Session
+	svc, err := HealthClient(ctx, d)
+	if err != nil {
+		plugin.Logger(ctx).Error("aws_health_event.getHealthEventDescription", "client error", err)
+		return nil, err
+	}
+
+	eventDetails, err := svc.DescribeEventDetails(ctx, &health.DescribeEventDetailsInput{EventArns: []string{*event.Arn}})
+	if err != nil {
+		plugin.Logger(ctx).Error("aws_health_event.getHealthEventDescription", "api error", err)
+		return nil, err
+	}
+
+	if len(eventDetails.SuccessfulSet) == 1 {
+		return eventDetails.SuccessfulSet[0].EventDescription.LatestDescription, nil
+	}
+
+	return nil, nil
+}
+
 // / UTILITY FUNCTION
 // Build health event list call input filter
 func buildHealthEventFilter(d *plugin.QueryData) *types.EventFilter {
 	filter := &types.EventFilter{}
 
 	filterQuals := map[string]string{
+		"actionability":       "string",
 		"arn":                 "string",
 		"availability_zone":   "string",
 		"status_code":         "string",
@@ -184,8 +221,12 @@ func buildHealthEventFilter(d *plugin.QueryData) *types.EventFilter {
 		if dataType == "string" && d.EqualsQualString(columnName) != "" {
 			value := d.EqualsQualString(columnName)
 			switch columnName {
+			case "actionability":
+				filter.Actionabilities = []types.EventActionability{
+					types.EventActionability(value),
+				}
 			case "arn":
-				filter.EntityArns = ([]string{value})
+				filter.EventArns = []string{value}
 			case "availability_zone":
 				filter.AvailabilityZones = []string{value}
 			case "status_code":

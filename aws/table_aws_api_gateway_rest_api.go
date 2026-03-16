@@ -10,8 +10,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/apigateway"
 	"github.com/aws/aws-sdk-go-v2/service/apigateway/types"
 
-	apigatewayv1 "github.com/aws/aws-sdk-go/service/apigateway"
-
 	go_kit_packs "github.com/turbot/go-kit/types"
 
 	"github.com/turbot/steampipe-plugin-sdk/v5/grpc/proto"
@@ -37,7 +35,7 @@ func tableAwsAPIGatewayRestAPI(_ context.Context) *plugin.Table {
 			Hydrate: listRestAPI,
 			Tags:    map[string]string{"service": "apigateway", "action": "GetRestApis"},
 		},
-		GetMatrixItemFunc: SupportedRegionMatrix(apigatewayv1.EndpointsID),
+		GetMatrixItemFunc: SupportedRegionMatrix(AWS_APIGATEWAY_SERVICE_ID),
 		Columns: awsRegionalColumns([]*plugin.Column{
 			{
 				Name:        "name",
@@ -115,6 +113,31 @@ func tableAwsAPIGatewayRestAPI(_ context.Context) *plugin.Table {
 				Description: "The endpoint configuration of this RestApi showing the endpoint types of the API",
 				Type:        proto.ColumnType_JSON,
 				Transform:   transform.FromField("EndpointConfiguration.VpcEndpointIds"),
+			},
+			{
+				Name:        "api_status",
+				Description: "The status of the API",
+				Type:        proto.ColumnType_STRING,
+			},
+			{
+				Name:        "api_status_message",
+				Description: "The status message of the API",
+				Type:        proto.ColumnType_STRING,
+			},
+			{
+				Name:        "disable_execute_api_endpoint",
+				Description: "Specifies whether clients can invoke the API by using the default execute-api endpoint",
+				Type:        proto.ColumnType_BOOL,
+			},
+			{
+				Name:        "endpoint_access_mode",
+				Description: "The endpoint access mode of the API",
+				Type:        proto.ColumnType_STRING,
+			},
+			{
+				Name:        "security_policy",
+				Description: "The Transport Layer Security (TLS) version and cipher suite for this RestApi",
+				Type:        proto.ColumnType_STRING,
 			},
 			{
 				Name:        "warnings",

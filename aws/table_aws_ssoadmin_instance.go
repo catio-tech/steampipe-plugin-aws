@@ -6,8 +6,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ssoadmin"
 
-	ssoadminv1 "github.com/aws/aws-sdk-go/service/ssoadmin"
-
 	"github.com/turbot/steampipe-plugin-sdk/v5/grpc/proto"
 	"github.com/turbot/steampipe-plugin-sdk/v5/plugin"
 	"github.com/turbot/steampipe-plugin-sdk/v5/plugin/transform"
@@ -21,7 +19,7 @@ func tableAwsSsoAdminInstance(_ context.Context) *plugin.Table {
 			Hydrate: listSsoAdminInstances,
 			Tags:    map[string]string{"service": "sso", "action": "ListInstances"},
 		},
-		GetMatrixItemFunc: SupportedRegionMatrix(ssoadminv1.EndpointsID),
+		GetMatrixItemFunc: SupportedRegionMatrix(AWS_SSO_SERVICE_ID),
 		Columns: awsRegionalColumns([]*plugin.Column{
 			{
 				Name:        "arn",
@@ -32,6 +30,26 @@ func tableAwsSsoAdminInstance(_ context.Context) *plugin.Table {
 			{
 				Name:        "identity_store_id",
 				Description: "The identifier of the identity store that is connected to the SSO instance.",
+				Type:        proto.ColumnType_STRING,
+			},
+			{
+				Name:        "name",
+				Description: "The name of the Identity Center instance.",
+				Type:        proto.ColumnType_STRING,
+			},
+			{
+				Name:        "created_date",
+				Description: "The date and time that the Identity Center instance was created.",
+				Type:        proto.ColumnType_TIMESTAMP,
+			},
+			{
+				Name:        "owner_account_id",
+				Description: "The AWS account ID number of the owner of the Identity Center instance.",
+				Type:        proto.ColumnType_STRING,
+			},
+			{
+				Name:        "status",
+				Description: "The current status of this Identity Center instance.",
 				Type:        proto.ColumnType_STRING,
 			},
 

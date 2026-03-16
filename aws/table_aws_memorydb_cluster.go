@@ -6,8 +6,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/memorydb"
 
-	memorydbv1 "github.com/aws/aws-sdk-go/service/memorydb"
-
 	"github.com/turbot/steampipe-plugin-sdk/v5/grpc/proto"
 	"github.com/turbot/steampipe-plugin-sdk/v5/plugin"
 	"github.com/turbot/steampipe-plugin-sdk/v5/plugin/transform"
@@ -29,7 +27,7 @@ func tableAwsMemoryDBCluster(_ context.Context) *plugin.Table {
 				{Name: "name", Require: plugin.Optional},
 			},
 		},
-		GetMatrixItemFunc: SupportedRegionMatrix(memorydbv1.EndpointsID),
+		GetMatrixItemFunc: SupportedRegionMatrix(AWS_MEMORY_DB_SERVICE_ID),
 		Columns: awsRegionalColumns([]*plugin.Column{
 			{
 				Name:        "name",
@@ -212,6 +210,7 @@ func listAwsMemoryDBClusters(ctx context.Context, d *plugin.QueryData, h *plugin
 	// Page size must be greater than 0 and less than or equal to 1000
 	input := &memorydb.DescribeClustersInput{
 		MaxResults: aws.Int32(maxLimit),
+		ShowShardDetails: aws.Bool(true),
 	}
 
 	paginator := memorydb.NewDescribeClustersPaginator(svc, input, func(o *memorydb.DescribeClustersPaginatorOptions) {
