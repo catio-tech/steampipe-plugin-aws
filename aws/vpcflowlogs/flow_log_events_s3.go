@@ -317,7 +317,7 @@ func (r *S3FlowLogEventsRetriever) processObjectsWorker(
 		if ctx.Err() != nil {
 			r.logger.Trace("listS3FlowLogEvents", "worker_id", workerID,
 				"message", "Context done after object download", "key", key, "reason", ctx.Err())
-			objOut.Body.Close()
+			_ = objOut.Body.Close()
 			return
 		}
 
@@ -326,7 +326,7 @@ func (r *S3FlowLogEventsRetriever) processObjectsWorker(
 			r.logger.Error("listS3FlowLogEvents", "worker_id", workerID,
 				"message", "Failed to create gzip reader",
 				"key", key, "error", err)
-			objOut.Body.Close()
+			_ = objOut.Body.Close()
 			if !sendWithContext(ctx, errorChan, err) {
 				return
 			}
@@ -353,8 +353,8 @@ func (r *S3FlowLogEventsRetriever) processObjectsWorker(
 					r.logger.Debug("listS3FlowLogEvents", "worker_id", workerID,
 						"message", "Context done during scanning", "key", key,
 						"lines_processed", lineNum, "reason", ctx.Err())
-					gr.Close()
-					objOut.Body.Close()
+					_ = gr.Close()
+					_ = objOut.Body.Close()
 					return
 				}
 			}
@@ -414,8 +414,8 @@ func (r *S3FlowLogEventsRetriever) processObjectsWorker(
 				r.logger.Debug("listS3FlowLogEvents", "worker_id", workerID,
 					"message", "Failed to send event to channel, context done",
 					"key", key, "lines_processed", lineNum)
-				gr.Close()
-				objOut.Body.Close()
+				_ = gr.Close()
+				_ = objOut.Body.Close()
 				return
 			}
 			lineNum++
@@ -434,8 +434,8 @@ func (r *S3FlowLogEventsRetriever) processObjectsWorker(
 		r.logger.Trace("listS3FlowLogEvents", "worker_id", workerID,
 			"message", "Completed processing object",
 			"key", key, "lines_processed", lineNum)
-		gr.Close()
-		objOut.Body.Close()
+		_ = gr.Close()
+		_ = objOut.Body.Close()
 
 		// Check context after finishing an object
 		if ctx.Err() != nil {

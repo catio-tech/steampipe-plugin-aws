@@ -212,7 +212,7 @@ func listCredentialReports(ctx context.Context, d *plugin.QueryData, _ *plugin.H
 		var ae smithy.APIError
 		if errors.As(err, &ae) {
 			if ae.ErrorCode() == "ReportNotPresent" {
-				return nil, errors.New("Credential report not available. Please run 'aws iam generate-credential-report' to generate it and try again.")
+				return nil, errors.New("credential report not available; please run 'aws iam generate-credential-report' to generate it and try again")
 			}
 		}
 		plugin.Logger(ctx).Error("aws_iam_credential_report.listCredentialReports", "api_error", err)
@@ -267,9 +267,10 @@ func passwordEnabledToBool(_ context.Context, d *transform.TransformData) (inter
 func passwordStatus(_ context.Context, d *transform.TransformData) (interface{}, error) {
 	used := types.SafeString(d.Value)
 	pwdStatus := "used"
-	if used == "no_information" {
+	switch used {
+	case "no_information":
 		pwdStatus = "never_used"
-	} else if used == "N/A" {
+	case "N/A":
 		pwdStatus = "not_set"
 	}
 	return pwdStatus, nil

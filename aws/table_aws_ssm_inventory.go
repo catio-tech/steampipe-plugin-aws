@@ -451,9 +451,10 @@ func buildSSMInventoryFilter(ctx context.Context, quals *plugin.QueryData) ssm.G
 					Values: []string{quals.EqualsQualString("instance_id")},
 				},
 			}
-			if q.Operator == "=" {
+			switch q.Operator {
+			case "=":
 				input.Filters[0].Type = types.InventoryQueryOperatorTypeEqual
-			} else if q.Operator == "<>" {
+			case "<>":
 				input.Filters[0].Type = types.InventoryQueryOperatorTypeNotEqual
 			}
 		}
@@ -492,9 +493,10 @@ func buildSSMInventoryFilter(ctx context.Context, quals *plugin.QueryData) ssm.G
 							Values: []string{value.(string)},
 						},
 					}
-					if q.Operator == "=" {
+					switch q.Operator {
+					case "=":
 						input.Filters[0].Type = types.InventoryQueryOperatorTypeEqual
-					} else if q.Operator == "<>" {
+					case "<>":
 						input.Filters[0].Type = types.InventoryQueryOperatorTypeNotEqual
 					}
 					input.Filters = append(input.Filters, inventoryFilter)
@@ -504,13 +506,14 @@ func buildSSMInventoryFilter(ctx context.Context, quals *plugin.QueryData) ssm.G
 					if shouldFilterKeyValueApplied {
 						inventoryFilter.Key = aws.String(value.(string))
 						inventoryFilter.Values = []string{filterValue}
-						if filterOperator == "=" {
+						switch filterOperator {
+						case "=":
 							inventoryFilter.Type = types.InventoryQueryOperatorTypeEqual
-						} else if filterOperator == "<>" {
+						case "<>":
 							inventoryFilter.Type = types.InventoryQueryOperatorTypeNotEqual
-						} else if filterOperator == "<" || filterOperator == "<=" {
+						case "<", "<=":
 							inventoryFilter.Type = types.InventoryQueryOperatorTypeLessThan
-						} else if filterOperator == ">" || filterOperator == ">=" {
+						case ">", ">=":
 							inventoryFilter.Type = types.InventoryQueryOperatorTypeGreaterThan
 						}
 						input.Filters = append(input.Filters, inventoryFilter)
