@@ -7,9 +7,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/costoptimizationhub"
 	"github.com/aws/aws-sdk-go-v2/service/costoptimizationhub/types"
 
-	"github.com/turbot/steampipe-plugin-sdk/v5/grpc/proto"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin/transform"
+	"github.com/turbot/steampipe-plugin-sdk/v6/grpc/proto"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin/transform"
 )
 
 func tableAwsCostOptimizationHubRecommendation(_ context.Context) *plugin.Table {
@@ -315,7 +315,7 @@ func buildCostOptimizationHubRecommendationInputFromQuals(quals plugin.KeyColumn
 			switch columnName {
 			case "restart_needed", "rollback_possible":
 				value := getQualsValueByColumn(quals, columnName, "boolean")
-				val := value.(string) == "true"
+				val := value.(bool)
 				if columnName == "restart_needed" {
 					param.RestartNeeded = &val
 				}

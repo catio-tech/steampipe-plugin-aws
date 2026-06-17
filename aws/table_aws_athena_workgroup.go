@@ -7,11 +7,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/athena"
 	"github.com/aws/aws-sdk-go-v2/service/athena/types"
 
-	athenav1 "github.com/aws/aws-sdk-go/service/athena"
-
-	"github.com/turbot/steampipe-plugin-sdk/v5/grpc/proto"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin/transform"
+	"github.com/turbot/steampipe-plugin-sdk/v6/grpc/proto"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin/transform"
 )
 
 func tableAwsAthenaWorkGroup(_ context.Context) *plugin.Table {
@@ -33,7 +31,7 @@ func tableAwsAthenaWorkGroup(_ context.Context) *plugin.Table {
 				Tags: map[string]string{"service": "athena", "action": "GetWorkGroup"},
 			},
 		},
-		GetMatrixItemFunc: SupportedRegionMatrix(athenav1.EndpointsID),
+		GetMatrixItemFunc: SupportedRegionMatrix(AWS_ATHENA_SERVICE_ID),
 		Columns: awsRegionalColumns([]*plugin.Column{
 			{
 				Name:        "name",
@@ -150,6 +148,27 @@ func tableAwsAthenaWorkGroup(_ context.Context) *plugin.Table {
 				Type:        proto.ColumnType_STRING,
 				Hydrate:     getAwsAthenaWorkGroup,
 				Transform:   transform.FromField("Configuration.ResultConfiguration.OutputLocation"),
+			},
+			{
+				Name:        "managed_query_results_enabled",
+				Description: "Indicates whether Athena managed query results are enabled. If set to true, allows you to store query results in Athena owned storage.",
+				Type:        proto.ColumnType_BOOL,
+				Hydrate:     getAwsAthenaWorkGroup,
+				Transform:   transform.FromField("Configuration.ManagedQueryResultsConfiguration.Enabled"),
+			},
+			{
+				Name:        "managed_query_results_kms_key",
+				Description: "The KMS key ARN used to encrypt managed query results in Athena owned storage.",
+				Type:        proto.ColumnType_STRING,
+				Hydrate:     getAwsAthenaWorkGroup,
+				Transform:   transform.FromField("Configuration.ManagedQueryResultsConfiguration.EncryptionConfiguration.KmsKey"),
+			},
+			{
+				Name:        "enable_minimum_encryption_configuration",
+				Description: "Enforces a minimal level of encryption for the workgroup.",
+				Type:        proto.ColumnType_BOOL,
+				Hydrate:     getAwsAthenaWorkGroup,
+				Transform:   transform.FromField("Configuration.EnableMinimumEncryptionConfiguration"),
 			},
 		}),
 	}

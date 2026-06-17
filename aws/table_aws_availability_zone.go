@@ -6,10 +6,10 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
-	ec2v1 "github.com/aws/aws-sdk-go/service/ec2"
-	"github.com/turbot/steampipe-plugin-sdk/v5/grpc/proto"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin/transform"
+
+	"github.com/turbot/steampipe-plugin-sdk/v6/grpc/proto"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin/transform"
 )
 
 //// TABLE DEFINITION
@@ -40,7 +40,7 @@ func tableAwsAvailabilityZone(_ context.Context) *plugin.Table {
 				},
 			},
 		},
-		GetMatrixItemFunc: SupportedRegionMatrix(ec2v1.EndpointsID),
+		GetMatrixItemFunc: SupportedRegionMatrix(AWS_EC2_SERVICE_ID),
 		Columns: []*plugin.Column{
 			{
 				Name:        "name",
@@ -131,6 +131,10 @@ func listAwsAvailabilityZones(ctx context.Context, d *plugin.QueryData, h *plugi
 	// execute list call
 	resp, err := svc.DescribeAvailabilityZones(ctx, input)
 	if err != nil {
+		// Due to parent hydrate usage, the default ignore error codes configured in connection config are not respected, so we need to handle it here
+		if shouldIgnoreErrorPluginDefault()(ctx, d, h, err) {
+			return nil, nil
+		}
 		plugin.Logger(ctx).Error("aws_availability_zone.listAwsAvailabilityZones", "api_error", err)
 		return nil, err
 	}

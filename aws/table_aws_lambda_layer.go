@@ -5,11 +5,9 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/service/lambda"
 
-	lambdav1 "github.com/aws/aws-sdk-go/service/lambda"
-
-	"github.com/turbot/steampipe-plugin-sdk/v5/grpc/proto"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin/transform"
+	"github.com/turbot/steampipe-plugin-sdk/v6/grpc/proto"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin/transform"
 )
 
 func tableAwsLambdaLayer(_ context.Context) *plugin.Table {
@@ -20,7 +18,7 @@ func tableAwsLambdaLayer(_ context.Context) *plugin.Table {
 			Hydrate: listLambdaLayers,
 			Tags:    map[string]string{"service": "lambda", "action": "ListLayers"},
 		},
-		GetMatrixItemFunc: SupportedRegionMatrix(lambdav1.EndpointsID),
+		GetMatrixItemFunc: SupportedRegionMatrix(AWS_LAMBDA_SERVICE_ID),
 		Columns: awsRegionalColumns([]*plugin.Column{
 			{
 				Name:        "layer_name",

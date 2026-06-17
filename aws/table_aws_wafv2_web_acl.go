@@ -11,9 +11,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/wafv2/types"
 	"github.com/aws/smithy-go"
 
-	"github.com/turbot/steampipe-plugin-sdk/v5/grpc/proto"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin/transform"
+	"github.com/turbot/steampipe-plugin-sdk/v6/grpc/proto"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin/transform"
 )
 
 //// TABLE DEFINITION
@@ -96,6 +96,30 @@ func tableAwsWafv2WebAcl(_ context.Context) *plugin.Table {
 				Name:        "managed_by_firewall_manager",
 				Description: "Indicates whether this web ACL is managed by AWS Firewall Manager.",
 				Type:        proto.ColumnType_BOOL,
+				Hydrate:     getAwsWafv2WebAcl,
+			},
+			{
+				Name:        "custom_response_bodies",
+				Description: "The custom response bodies that AWS WAF returns to web requests when they are blocked.",
+				Type:        proto.ColumnType_JSON,
+				Hydrate:     getAwsWafv2WebAcl,
+			},
+			{
+				Name:        "label_namespace",
+				Description: "The label namespace prefix for this web ACL.",
+				Type:        proto.ColumnType_STRING,
+				Hydrate:     getAwsWafv2WebAcl,
+			},
+			{
+				Name:        "retrofitted_by_firewall_manager",
+				Description: "Indicates whether this web ACL has been retrofitted by AWS Firewall Manager.",
+				Type:        proto.ColumnType_BOOL,
+				Hydrate:     getAwsWafv2WebAcl,
+			},
+			{
+				Name:        "token_domains",
+				Description: "List of domains that are allowed to use tokens for the challenge action.",
+				Type:        proto.ColumnType_JSON,
 				Hydrate:     getAwsWafv2WebAcl,
 			},
 			{

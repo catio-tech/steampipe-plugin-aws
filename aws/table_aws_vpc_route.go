@@ -5,11 +5,9 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 
-	ec2v1 "github.com/aws/aws-sdk-go/service/ec2"
-
-	"github.com/turbot/steampipe-plugin-sdk/v5/grpc/proto"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin/transform"
+	"github.com/turbot/steampipe-plugin-sdk/v6/grpc/proto"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin/transform"
 )
 
 //// TABLE DEFINITION
@@ -22,7 +20,7 @@ func tableAwsVpcRoute(_ context.Context) *plugin.Table {
 			ParentHydrate: listVpcRouteTables,
 			Hydrate:       listAwsVpcRoute,
 		},
-		GetMatrixItemFunc: SupportedRegionMatrix(ec2v1.EndpointsID),
+		GetMatrixItemFunc: SupportedRegionMatrix(AWS_EC2_SERVICE_ID),
 		Columns: awsRegionalColumns([]*plugin.Column{
 			{
 				Name:        "route_table_id",

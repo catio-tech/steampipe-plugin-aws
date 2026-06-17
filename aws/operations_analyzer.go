@@ -10,7 +10,7 @@ import (
 	"sync"
 
 	pg_query "github.com/pganalyze/pg_query_go/v6"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin"
 )
 
 // PluginAnalysisTools holds the cached analysis data for the plugin.

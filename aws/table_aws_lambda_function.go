@@ -9,13 +9,11 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/lambda"
 	"github.com/aws/aws-sdk-go-v2/service/lambda/types"
 
-	lambdav1 "github.com/aws/aws-sdk-go/service/lambda"
-
 	"github.com/aws/smithy-go"
 
-	"github.com/turbot/steampipe-plugin-sdk/v5/grpc/proto"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin/transform"
+	"github.com/turbot/steampipe-plugin-sdk/v6/grpc/proto"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin/transform"
 )
 
 func tableAwsLambdaFunction(_ context.Context) *plugin.Table {
@@ -31,7 +29,7 @@ func tableAwsLambdaFunction(_ context.Context) *plugin.Table {
 			Hydrate: listAwsLambdaFunctions,
 			Tags:    map[string]string{"service": "lambda", "action": "ListFunctions"},
 		},
-		GetMatrixItemFunc: SupportedRegionMatrix(lambdav1.EndpointsID),
+		GetMatrixItemFunc: SupportedRegionMatrix(AWS_LAMBDA_SERVICE_ID),
 		HydrateConfig: []plugin.HydrateConfig{
 			{
 				Func: getAwsLambdaFunction,
@@ -209,6 +207,7 @@ func tableAwsLambdaFunction(_ context.Context) *plugin.Table {
 				Description: "The deployment package of the function or version.",
 				Type:        proto.ColumnType_JSON,
 				Hydrate:     getAwsLambdaFunction,
+				Transform:   transform.FromField("Code").Transform(filterCodeLocation),
 			},
 			{
 				Name:        "environment_variables",
@@ -221,6 +220,12 @@ func tableAwsLambdaFunction(_ context.Context) *plugin.Table {
 				Description: "Connection settings for an Amazon EFS file system.",
 				Type:        proto.ColumnType_JSON,
 				Transform:   transform.FromField("Configuration.FileSystemConfigs", "FileSystemConfigs"),
+			},
+			{
+				Name:        "ephemeral_storage",
+				Description: "The size of the function's /tmp directory in MB. The default value is 512, but can be any whole number between 512 and 10,240 MB.",
+				Type:        proto.ColumnType_JSON,
+				Transform:   transform.FromField("Configuration.EphemeralStorage", "EphemeralStorage"),
 			},
 			{
 				Name:        "policy",
@@ -483,6 +488,18 @@ func getLambdaFunctionUrlConfig(ctx context.Context, d *plugin.QueryData, h *plu
 	}
 
 	return urlConfigs, nil
+}
+
+func filterCodeLocation(_ context.Context, d *transform.TransformData) (interface{}, error) {
+	code, ok := d.Value.(*types.FunctionCodeLocation)
+	if !ok || code == nil {
+		return nil, nil
+	}
+	return map[string]interface{}{
+		"ImageUri":         code.ImageUri,
+		"RepositoryType":   code.RepositoryType,
+		"ResolvedImageUri": code.ResolvedImageUri,
+	}, nil
 }
 
 func functionName(item interface{}) string {

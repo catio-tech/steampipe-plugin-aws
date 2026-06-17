@@ -9,10 +9,10 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/resourceexplorer2"
 	"github.com/aws/aws-sdk-go-v2/service/resourceexplorer2/types"
 
-	"github.com/turbot/steampipe-plugin-sdk/v5/grpc/proto"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin/transform"
-	"github.com/turbot/steampipe-plugin-sdk/v5/query_cache"
+	"github.com/turbot/steampipe-plugin-sdk/v6/grpc/proto"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin/transform"
+	"github.com/turbot/steampipe-plugin-sdk/v6/query_cache"
 )
 
 //// TABLE DEFINITION
@@ -146,7 +146,7 @@ func awsResourceExplorerSearch(ctx context.Context, d *plugin.QueryData, h *plug
 		}
 
 		if len(indexesOutput.Indexes) == 0 {
-			return nil, fmt.Errorf("Aggregator index not found in account %s. Please create an aggregator index or specify \"view_arn\".", accountID)
+			return nil, fmt.Errorf("aggregator index not found in account %s. Please create an aggregator index or specify \"view_arn\"", accountID)
 		}
 
 		// Each account can only have 1 aggregator index
@@ -170,7 +170,7 @@ func awsResourceExplorerSearch(ctx context.Context, d *plugin.QueryData, h *plug
 		}
 
 		if defaultViewOutput.ViewArn == nil {
-			return nil, fmt.Errorf("Default view not found in %s region in account %s. Please create a default view or specify \"view_arn\".", region, accountID)
+			return nil, fmt.Errorf("default view not found in %s region in account %s. Please create a default view or specify \"view_arn\"", region, accountID)
 		}
 	}
 

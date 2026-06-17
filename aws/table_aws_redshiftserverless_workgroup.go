@@ -7,11 +7,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/redshiftserverless"
 	"github.com/aws/aws-sdk-go-v2/service/redshiftserverless/types"
 
-	redshiftserverlessv1 "github.com/aws/aws-sdk-go/service/redshiftserverless"
-
-	"github.com/turbot/steampipe-plugin-sdk/v5/grpc/proto"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin/transform"
+	"github.com/turbot/steampipe-plugin-sdk/v6/grpc/proto"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin/transform"
 )
 
 //// TABLE DEFINITION
@@ -38,7 +36,7 @@ func tableAwsRedshiftServerlessWorkgroup(_ context.Context) *plugin.Table {
 				Tags: map[string]string{"service": "redshift-serverless", "action": "ListTagsForResource"},
 			},
 		},
-		GetMatrixItemFunc: SupportedRegionMatrix(redshiftserverlessv1.EndpointsID),
+		GetMatrixItemFunc: SupportedRegionMatrix(AWS_REDSHIFT_SERVERLESS_SERVICE_ID),
 		Columns: awsRegionalColumns([]*plugin.Column{
 			{
 				Name:        "workgroup_name",

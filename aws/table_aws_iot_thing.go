@@ -7,12 +7,10 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/iot"
 	"github.com/aws/aws-sdk-go-v2/service/iot/types"
 
-	iotv1 "github.com/aws/aws-sdk-go/service/iot"
-
-	"github.com/turbot/steampipe-plugin-sdk/v5/grpc/proto"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin/transform"
-	"github.com/turbot/steampipe-plugin-sdk/v5/query_cache"
+	"github.com/turbot/steampipe-plugin-sdk/v6/grpc/proto"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin/transform"
+	"github.com/turbot/steampipe-plugin-sdk/v6/query_cache"
 )
 
 //// TABLE DEFINITION
@@ -47,7 +45,7 @@ func tableAwsIoTThing(_ context.Context) *plugin.Table {
 				Tags: map[string]string{"service": "iot", "action": "DescribeThing"},
 			},
 		},
-		GetMatrixItemFunc: SupportedRegionMatrix(iotv1.EndpointsID),
+		GetMatrixItemFunc: SupportedRegionMatrix(AWS_IOT_SERVICE_ID),
 		Columns: awsRegionalColumns([]*plugin.Column{
 			{
 				Name:        "thing_name",

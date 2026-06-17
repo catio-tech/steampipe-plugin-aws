@@ -8,12 +8,10 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 	"github.com/aws/aws-sdk-go-v2/service/ssm/types"
 
-	ssmv1 "github.com/aws/aws-sdk-go/service/ssm"
-
-	"github.com/turbot/steampipe-plugin-sdk/v5/grpc/proto"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin/transform"
-	"github.com/turbot/steampipe-plugin-sdk/v5/query_cache"
+	"github.com/turbot/steampipe-plugin-sdk/v6/grpc/proto"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin/transform"
+	"github.com/turbot/steampipe-plugin-sdk/v6/query_cache"
 )
 
 func tableAwsSSMDocument(_ context.Context) *plugin.Table {
@@ -47,7 +45,7 @@ func tableAwsSSMDocument(_ context.Context) *plugin.Table {
 				Tags: map[string]string{"service": "ssm", "action": "DescribeDocument"},
 			},
 		},
-		GetMatrixItemFunc: SupportedRegionMatrix(ssmv1.EndpointsID),
+		GetMatrixItemFunc: SupportedRegionMatrix(AWS_SSM_SERVICE_ID),
 		Columns: awsRegionalColumns([]*plugin.Column{
 			{
 				Name:        "display_name",

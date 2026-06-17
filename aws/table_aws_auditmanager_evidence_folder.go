@@ -8,11 +8,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/auditmanager"
 	"github.com/aws/aws-sdk-go-v2/service/auditmanager/types"
 
-	auditmanagerv1 "github.com/aws/aws-sdk-go/service/auditmanager"
-
-	"github.com/turbot/steampipe-plugin-sdk/v5/grpc/proto"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin/transform"
+	"github.com/turbot/steampipe-plugin-sdk/v6/grpc/proto"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin/transform"
 )
 
 //// TABLE DEFINITION
@@ -34,7 +32,7 @@ func tableAwsAuditManagerEvidenceFolder(_ context.Context) *plugin.Table {
 			Hydrate:       listAuditManagerEvidenceFolders,
 			Tags:          map[string]string{"service": "auditmanager", "action": "GetEvidenceFoldersByAssessment"},
 		},
-		GetMatrixItemFunc: SupportedRegionMatrix(auditmanagerv1.EndpointsID),
+		GetMatrixItemFunc: SupportedRegionMatrix(AWS_AUDITMANAGER_SERVICE_ID),
 		Columns: awsRegionalColumns([]*plugin.Column{
 			{
 				Name:        "name",

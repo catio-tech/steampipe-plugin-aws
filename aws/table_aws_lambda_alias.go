@@ -10,13 +10,11 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/lambda"
 	"github.com/aws/aws-sdk-go-v2/service/lambda/types"
 
-	lambdav1 "github.com/aws/aws-sdk-go/service/lambda"
-
 	"github.com/aws/smithy-go"
 
-	"github.com/turbot/steampipe-plugin-sdk/v5/grpc/proto"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin/transform"
+	"github.com/turbot/steampipe-plugin-sdk/v6/grpc/proto"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin/transform"
 )
 
 func tableAwsLambdaAlias(_ context.Context) *plugin.Table {
@@ -40,7 +38,7 @@ func tableAwsLambdaAlias(_ context.Context) *plugin.Table {
 				{Name: "function_name", Require: plugin.Optional},
 			},
 		},
-		GetMatrixItemFunc: SupportedRegionMatrix(lambdav1.EndpointsID),
+		GetMatrixItemFunc: SupportedRegionMatrix(AWS_LAMBDA_SERVICE_ID),
 		HydrateConfig: []plugin.HydrateConfig{
 			{
 				Func: getLambdaAliasPolicy,
@@ -106,6 +104,12 @@ func tableAwsLambdaAlias(_ context.Context) *plugin.Table {
 				Type:        proto.ColumnType_JSON,
 				Hydrate:     getLambdaAliasUrlConfig,
 				Transform:   transform.FromValue(),
+			},
+			{
+				Name:        "routing_config",
+				Description: "The routing configuration of the alias, including additional version weights for traffic splitting.",
+				Type:        proto.ColumnType_JSON,
+				Transform:   transform.FromField("Alias.RoutingConfig"),
 			},
 
 			// Steampipe standard columns

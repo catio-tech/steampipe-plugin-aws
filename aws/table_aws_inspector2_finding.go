@@ -9,12 +9,10 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/inspector2"
 	"github.com/aws/aws-sdk-go-v2/service/inspector2/types"
 
-	inspector2v1 "github.com/aws/aws-sdk-go/service/inspector2"
-
-	"github.com/turbot/steampipe-plugin-sdk/v5/grpc/proto"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin/transform"
-	"github.com/turbot/steampipe-plugin-sdk/v5/query_cache"
+	"github.com/turbot/steampipe-plugin-sdk/v6/grpc/proto"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin/transform"
+	"github.com/turbot/steampipe-plugin-sdk/v6/query_cache"
 )
 
 //// TABLE DEFINITION
@@ -68,7 +66,7 @@ func tableAwsInspector2Finding(_ context.Context) *plugin.Table {
 				{Name: "vulnerable_package", Operators: []string{"="}, Require: plugin.Optional, CacheMatch: query_cache.CacheMatchExact},
 			},
 		},
-		GetMatrixItemFunc: SupportedRegionMatrix(inspector2v1.EndpointsID),
+		GetMatrixItemFunc: SupportedRegionMatrix(AWS_INSPECTOR2_SERVICE_ID),
 		Columns: awsRegionalColumns([]*plugin.Column{
 			{
 				// Technically, this would be "aws_account_id", but "aws" is

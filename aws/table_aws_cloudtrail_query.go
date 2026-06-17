@@ -8,9 +8,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/cloudtrail"
 	"github.com/aws/aws-sdk-go-v2/service/cloudtrail/types"
 
-	"github.com/turbot/steampipe-plugin-sdk/v5/grpc/proto"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin/transform"
+	"github.com/turbot/steampipe-plugin-sdk/v6/grpc/proto"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin/transform"
 )
 
 //// TABLE DEFINITION
@@ -24,13 +24,16 @@ func tableAwsCloudTrailQuery(_ context.Context) *plugin.Table {
 			Tags:       map[string]string{"service": "cloudtrail", "action": "DescribeQuery"},
 			KeyColumns: plugin.AllColumns([]string{"event_data_store_arn", "query_id"}),
 			IgnoreConfig: &plugin.IgnoreConfig{
-				ShouldIgnoreErrorFunc: shouldIgnoreErrors([]string{"EventDataStoreNotFoundException", "QueryIdNotFoundException"}),
+				ShouldIgnoreErrorFunc: shouldIgnoreErrors([]string{"EventDataStoreNotFoundException", "QueryIdNotFoundException", "UnsupportedOperationException"}),
 			},
 		},
 		List: &plugin.ListConfig{
 			ParentHydrate: listCloudTrailEventDataStores,
 			Hydrate:       listCloudTrailLakeQueries,
 			Tags:          map[string]string{"service": "cloudtrail", "action": "ListQueries"},
+			IgnoreConfig: &plugin.IgnoreConfig{
+				ShouldIgnoreErrorFunc: shouldIgnoreErrors([]string{"UnsupportedOperationException"}),
+			},
 			KeyColumns: plugin.KeyColumnSlice{
 				{
 					Name:    "event_data_store_arn",

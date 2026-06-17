@@ -11,9 +11,9 @@ import (
 
 	"github.com/aws/smithy-go"
 
-	"github.com/turbot/steampipe-plugin-sdk/v5/grpc/proto"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin/transform"
+	"github.com/turbot/steampipe-plugin-sdk/v6/grpc/proto"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin/transform"
 )
 
 //// TABLE DEFINITION
@@ -302,7 +302,7 @@ func getCloudtrailTrail(ctx context.Context, d *plugin.QueryData, _ *plugin.Hydr
 	// Create session
 	svc, err := CloudTrailClient(ctx, d)
 	if err != nil {
-		plugin.Logger(ctx).Error("aws_cloudtrail_trail.getCloudtrailTrailStatus", "client_error", err)
+		plugin.Logger(ctx).Error("aws_cloudtrail_trail.getCloudtrailTrail", "client_error", err)
 		return nil, err
 	}
 

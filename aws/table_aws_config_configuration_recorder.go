@@ -6,11 +6,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/configservice"
 	"github.com/aws/aws-sdk-go-v2/service/configservice/types"
 
-	configservicev1 "github.com/aws/aws-sdk-go/service/configservice"
-
-	"github.com/turbot/steampipe-plugin-sdk/v5/grpc/proto"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin/transform"
+	"github.com/turbot/steampipe-plugin-sdk/v6/grpc/proto"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin/transform"
 )
 
 func tableAwsConfigConfigurationRecorder(_ context.Context) *plugin.Table {
@@ -35,7 +33,7 @@ func tableAwsConfigConfigurationRecorder(_ context.Context) *plugin.Table {
 				Tags: map[string]string{"service": "config", "action": "DescribeConfigurationRecorderStatus"},
 			},
 		},
-		GetMatrixItemFunc: SupportedRegionMatrix(configservicev1.EndpointsID),
+		GetMatrixItemFunc: SupportedRegionMatrix(AWS_CONFIG_SERVICE_ID),
 		Columns: awsRegionalColumns([]*plugin.Column{
 			{
 				Name:        "name",

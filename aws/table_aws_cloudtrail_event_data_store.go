@@ -7,9 +7,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/cloudtrail"
 	"github.com/aws/aws-sdk-go-v2/service/cloudtrail/types"
 
-	"github.com/turbot/steampipe-plugin-sdk/v5/grpc/proto"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin/transform"
+	"github.com/turbot/steampipe-plugin-sdk/v6/grpc/proto"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin/transform"
 )
 
 //// TABLE DEFINITION
@@ -18,13 +18,20 @@ func tableAwsCloudtrailEventDataStore(_ context.Context) *plugin.Table {
 	return &plugin.Table{
 		Name:        "aws_cloudtrail_event_data_store",
 		Description: "AWS CloudTrail Event Data Store",
+		// We do encounter the UnsupportedOperationException for the region 'ap-southeast-5' where the operation is not supported.
 		Get: &plugin.GetConfig{
 			KeyColumns: plugin.SingleColumn("arn"),
 			Hydrate:    getCloudTrailEventDataStore,
+			IgnoreConfig: &plugin.IgnoreConfig{
+				ShouldIgnoreErrorFunc: shouldIgnoreErrors([]string{"UnsupportedOperationException"}),
+			},
 			Tags:       map[string]string{"service": "cloudtrail", "action": "GetEventDataStore"},
 		},
 		List: &plugin.ListConfig{
 			Hydrate: listCloudTrailEventDataStores,
+			IgnoreConfig: &plugin.IgnoreConfig{
+				ShouldIgnoreErrorFunc: shouldIgnoreErrors([]string{"UnsupportedOperationException"}),
+			},
 			Tags:    map[string]string{"service": "cloudtrail", "action": "ListEventDataStores"},
 		},
 		HydrateConfig: []plugin.HydrateConfig{

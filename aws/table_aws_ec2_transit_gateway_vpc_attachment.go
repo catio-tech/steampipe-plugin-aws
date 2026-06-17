@@ -7,11 +7,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 
-	ec2v1 "github.com/aws/aws-sdk-go/service/ec2"
-
-	"github.com/turbot/steampipe-plugin-sdk/v5/grpc/proto"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin/transform"
+	"github.com/turbot/steampipe-plugin-sdk/v6/grpc/proto"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin/transform"
 )
 
 func tableAwsEc2TransitGatewayVpcAttachment(_ context.Context) *plugin.Table {
@@ -43,7 +41,7 @@ func tableAwsEc2TransitGatewayVpcAttachment(_ context.Context) *plugin.Table {
 				ShouldIgnoreErrorFunc: shouldIgnoreErrors([]string{"InvalidAction"}),
 			},
 		},
-		GetMatrixItemFunc: SupportedRegionMatrix(ec2v1.EndpointsID),
+		GetMatrixItemFunc: SupportedRegionMatrix(AWS_EC2_SERVICE_ID),
 		Columns: awsRegionalColumns([]*plugin.Column{
 			{
 				Name:        "transit_gateway_attachment_id",
@@ -96,6 +94,13 @@ func tableAwsEc2TransitGatewayVpcAttachment(_ context.Context) *plugin.Table {
 				Description: "The ID of the route table for the transit gateway.",
 				Type:        proto.ColumnType_STRING,
 				Transform:   transform.FromField("Association.TransitGatewayRouteTableId"),
+			},
+			{
+				Name:        "options",
+				Description: "The options for the VPC attachment.",
+				Type:        proto.ColumnType_JSON,
+				Hydrate:     getEc2TransitGatewayVpcAttachmentOptions,
+				Transform:   transform.FromValue(),
 			},
 			{
 				Name:        "tags_src",
@@ -235,6 +240,39 @@ func getAwsEc2TransitGatewayVpcAttachmentAkas(ctx context.Context, d *plugin.Que
 	akas := []string{"arn:" + commonColumnData.Partition + ":ec2:" + region + ":" + commonColumnData.AccountId + ":transit-gateway-attachment/" + *transitGatewayAttachment.TransitGatewayAttachmentId}
 
 	return akas, nil
+}
+
+func getEc2TransitGatewayVpcAttachmentOptions(ctx context.Context, d *plugin.QueryData, h *plugin.HydrateData) (interface{}, error) {
+	transitGatewayAttachment := h.Item.(types.TransitGatewayAttachment)
+
+	// Only fetch options for VPC attachments
+	if transitGatewayAttachment.ResourceType != types.TransitGatewayAttachmentResourceTypeVpc {
+		return nil, nil
+	}
+
+	// Create Session
+	svc, err := EC2Client(ctx, d)
+	if err != nil {
+		plugin.Logger(ctx).Error("aws_ec2_transit_gateway_vpc_attachment.getEc2TransitGatewayVpcAttachmentOptions", "connection_error", err)
+		return nil, err
+	}
+
+	// Build params
+	params := &ec2.DescribeTransitGatewayVpcAttachmentsInput{
+		TransitGatewayAttachmentIds: []string{*transitGatewayAttachment.TransitGatewayAttachmentId},
+	}
+
+	op, err := svc.DescribeTransitGatewayVpcAttachments(ctx, params)
+	if err != nil {
+		plugin.Logger(ctx).Error("aws_ec2_transit_gateway_vpc_attachment.getEc2TransitGatewayVpcAttachmentOptions", "api_error", err)
+		return nil, err
+	}
+
+	if len(op.TransitGatewayVpcAttachments) > 0 && op.TransitGatewayVpcAttachments[0].Options != nil {
+		return op.TransitGatewayVpcAttachments[0].Options, nil
+	}
+
+	return nil, nil
 }
 
 //// TRANSFORM FUNCTIONS
