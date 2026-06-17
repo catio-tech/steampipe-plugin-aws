@@ -1,7 +1,7 @@
 # ---------------------------------------------------
 # Stage 1: Build your custom AWS plugin
 # ---------------------------------------------------
-FROM golang:1.23 AS plugin-builder
+FROM golang:1.26 AS plugin-builder
 
 WORKDIR /workspace
 
