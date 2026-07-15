@@ -8,6 +8,6 @@ install:
 docker-build-steampipe:
 	@docker build \
 		--platform $(PLATFORM) \
-		-t local/steampipe:latest \
+		-t local/steampipe:local \
 		-f docker/steampipe/Dockerfile \
 		.
