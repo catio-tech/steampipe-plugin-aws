@@ -10,8 +10,8 @@ import (
 	"strings"
 
 	"github.com/turbot/go-kit/types"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin/transform"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin/transform"
 )
 
 //
@@ -275,7 +275,7 @@ func canonicalPolicy(src string) (interface{}, error) {
 	var policy Policy
 
 	if err := json.Unmarshal([]byte(src), &policy); err != nil {
-		return nil, fmt.Errorf("Convert policy failed unmarshalling source data: %+v.  src: %s", err, url.QueryEscape(src))
+		return nil, fmt.Errorf("convert policy failed unmarshalling source data: %+v.  src: %s", err, url.QueryEscape(src))
 	}
 
 	return policy, nil

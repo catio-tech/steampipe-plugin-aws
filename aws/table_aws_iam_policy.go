@@ -8,9 +8,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 	"github.com/aws/aws-sdk-go-v2/service/iam/types"
 
-	"github.com/turbot/steampipe-plugin-sdk/v5/grpc/proto"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin/transform"
+	"github.com/turbot/steampipe-plugin-sdk/v6/grpc/proto"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin/transform"
 )
 
 //// TABLE DEFINITION
@@ -118,7 +118,7 @@ func tableAwsIamPolicy(_ context.Context) *plugin.Table {
 				Description: "Contains the details about the policy.",
 				Type:        proto.ColumnType_JSON,
 				Hydrate:     getPolicyVersion,
-				Transform:   transform.FromField("PolicyVersion.Document").Transform(transform.UnmarshalYAML),
+				Transform:   transform.FromField("PolicyVersion.Document").Transform(transform.UnmarshalJSON),
 			},
 			{
 				Name:        "policy_std",

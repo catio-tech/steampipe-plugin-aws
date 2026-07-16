@@ -12,11 +12,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sfn/types"
 	"github.com/aws/smithy-go"
 
-	sfnv1 "github.com/aws/aws-sdk-go/service/sfn"
-
-	"github.com/turbot/steampipe-plugin-sdk/v5/grpc/proto"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin/transform"
+	"github.com/turbot/steampipe-plugin-sdk/v6/grpc/proto"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin/transform"
 )
 
 func tableAwsStepFunctionsStateMachineExecutionHistory(_ context.Context) *plugin.Table {
@@ -28,7 +26,7 @@ func tableAwsStepFunctionsStateMachineExecutionHistory(_ context.Context) *plugi
 			Tags:          map[string]string{"service": "states", "action": "ListExecutions"},
 			ParentHydrate: listStepFunctionsStateMachines,
 		},
-		GetMatrixItemFunc: SupportedRegionMatrix(sfnv1.EndpointsID),
+		GetMatrixItemFunc: SupportedRegionMatrix(AWS_STATES_SERVICE_ID),
 		Columns: awsRegionalColumns([]*plugin.Column{
 			{
 				Name:        "id",

@@ -8,12 +8,10 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/cloudcontrol"
 	"github.com/aws/aws-sdk-go-v2/service/cloudcontrol/types"
 
-	cloudcontrolapiv1 "github.com/aws/aws-sdk-go/service/cloudcontrolapi"
-
-	"github.com/turbot/steampipe-plugin-sdk/v5/grpc/proto"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin/transform"
-	"github.com/turbot/steampipe-plugin-sdk/v5/query_cache"
+	"github.com/turbot/steampipe-plugin-sdk/v6/grpc/proto"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin/transform"
+	"github.com/turbot/steampipe-plugin-sdk/v6/query_cache"
 )
 
 func tableAwsCloudControlResource(_ context.Context) *plugin.Table {
@@ -42,7 +40,7 @@ func tableAwsCloudControlResource(_ context.Context) *plugin.Table {
 				Tags: map[string]string{"service": "cloudformation", "action": "GetResource"},
 			},
 		},
-		GetMatrixItemFunc: SupportedRegionMatrix(cloudcontrolapiv1.EndpointsID),
+		GetMatrixItemFunc: SupportedRegionMatrix(AWS_CLOUDCONTROLAPI_SERVICE_ID),
 		Columns: awsRegionalColumns([]*plugin.Column{
 			{
 				Name:        "type_name",

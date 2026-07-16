@@ -7,11 +7,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2"
 	"github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2/types"
 
-	elbv2v1 "github.com/aws/aws-sdk-go/service/elbv2"
-
-	"github.com/turbot/steampipe-plugin-sdk/v5/grpc/proto"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin/transform"
+	"github.com/turbot/steampipe-plugin-sdk/v6/grpc/proto"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin/transform"
 )
 
 //// TABLE DEFINITION
@@ -47,8 +45,12 @@ func tableAwsEc2TargetGroup(_ context.Context) *plugin.Table {
 				Func: getAwsEc2TargetGroupTags,
 				Tags: map[string]string{"service": "elasticloadbalancing", "action": "DescribeTags"},
 			},
+			{
+				Func: getAwsEc2TargetGroupAttributes,
+				Tags: map[string]string{"service": "elasticloadbalancing", "action": "DescribeTargetGroupAttributes"},
+			},
 		},
-		GetMatrixItemFunc: SupportedRegionMatrix(elbv2v1.EndpointsID),
+		GetMatrixItemFunc: SupportedRegionMatrix(AWS_ELASTICLOADBALANCING_SERVICE_ID),
 		Columns: awsRegionalColumns([]*plugin.Column{
 			{
 				Name:        "target_group_name",
@@ -152,6 +154,13 @@ func tableAwsEc2TargetGroup(_ context.Context) *plugin.Table {
 				Description: "Contains information about the health of the target.",
 				Type:        proto.ColumnType_JSON,
 				Hydrate:     getAwsEc2TargetGroupTargetHealthDescription,
+			},
+			{
+				Name:        "attributes",
+				Description: "Target group attributes including deregistration_delay, stickiness settings, load balancing algorithm, etc.",
+				Type:        proto.ColumnType_JSON,
+				Hydrate:     getAwsEc2TargetGroupAttributes,
+				Transform:   transform.FromValue().Transform(targetGroupAttributesToMap),
 			},
 			{
 				Name:        "tags_src",
@@ -322,6 +331,30 @@ func getAwsEc2TargetGroupTags(ctx context.Context, d *plugin.QueryData, h *plugi
 	return op, nil
 }
 
+func getAwsEc2TargetGroupAttributes(ctx context.Context, d *plugin.QueryData, h *plugin.HydrateData) (interface{}, error) {
+
+	targetGroup := h.Item.(types.TargetGroup)
+
+	// create service
+	svc, err := ELBV2Client(ctx, d)
+	if err != nil {
+		plugin.Logger(ctx).Error("aws_ec2_target_group.getAwsEc2TargetGroupAttributes", "connection_error", err)
+		return nil, err
+	}
+
+	params := &elasticloadbalancingv2.DescribeTargetGroupAttributesInput{
+		TargetGroupArn: targetGroup.TargetGroupArn,
+	}
+
+	op, err := svc.DescribeTargetGroupAttributes(ctx, params)
+	if err != nil {
+		plugin.Logger(ctx).Error("aws_ec2_target_group.getAwsEc2TargetGroupAttributes", "api_error", err)
+		return nil, err
+	}
+
+	return op, nil
+}
+
 //// TRANSFORM FUNCTIONS
 
 func targetGroupTagsToTurbotTags(_ context.Context, d *transform.TransformData) (interface{}, error) {
@@ -347,4 +380,19 @@ func targetGroupRawTags(_ context.Context, d *transform.TransformData) (interfac
 		}
 	}
 	return nil, nil
+}
+
+func targetGroupAttributesToMap(_ context.Context, d *transform.TransformData) (interface{}, error) {
+	data := d.HydrateItem.(*elasticloadbalancingv2.DescribeTargetGroupAttributesOutput)
+	attributesMap := map[string]string{}
+
+	if data.Attributes != nil {
+		for _, attr := range data.Attributes {
+			if attr.Key != nil && attr.Value != nil {
+				attributesMap[*attr.Key] = *attr.Value
+			}
+		}
+	}
+
+	return attributesMap, nil
 }

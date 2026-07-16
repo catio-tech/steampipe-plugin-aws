@@ -1,7 +1,11 @@
 # ---------------------------------------------------
 # Stage 1: Build your custom AWS plugin
 # ---------------------------------------------------
-FROM golang:1.23 AS plugin-builder
+# Chainguard Go: glibc (Wolfi), no perl, Go 1.26.5. Official
+# golang:*-bookworm images always pull in perl-base (Essential) and
+# have no slim variant — Hub flags those OS CVEs on the FROM line.
+# Pin by digest; public tags beyond :latest are limited.
+FROM cgr.dev/chainguard/go:latest@sha256:0dfefd80cb9ce8db4be95d20d324c56005f40116524cdc8b8410f46ecd4732cb AS plugin-builder
 
 WORKDIR /workspace
 
@@ -40,8 +44,10 @@ USER steampipe
 WORKDIR /home/steampipe
 ENV HOME=/home/steampipe
 
-# Install the Steampipe engine
-RUN sudo /bin/sh -c "$(curl -fsSL https://steampipe.io/install/steampipe.sh)"
+# Install the Steampipe engine, pinned so image rebuilds are reproducible.
+# Bump deliberately after checking plugin-protocol compatibility with the SDK
+# version in go.mod (plugin-sdk v6 works with CLI v2.x).
+RUN sudo /bin/sh -c "$(curl -fsSL https://steampipe.io/install/steampipe.sh)" -- v2.4.4
 
 # Install the csv pluginm its used to testing purposes
 RUN steampipe plugin install csv

@@ -6,13 +6,11 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/eventbridge"
 
-	eventbridgev1 "github.com/aws/aws-sdk-go/service/eventbridge"
-
 	"github.com/turbot/go-kit/types"
 
-	"github.com/turbot/steampipe-plugin-sdk/v5/grpc/proto"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin/transform"
+	"github.com/turbot/steampipe-plugin-sdk/v6/grpc/proto"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin/transform"
 )
 
 func tableAwsEventBridgeRule(_ context.Context) *plugin.Table {
@@ -50,7 +48,7 @@ func tableAwsEventBridgeRule(_ context.Context) *plugin.Table {
 				Tags: map[string]string{"service": "events", "action": "ListTagsForResource"},
 			},
 		},
-		GetMatrixItemFunc: SupportedRegionMatrix(eventbridgev1.EndpointsID),
+		GetMatrixItemFunc: SupportedRegionMatrix(AWS_EVENTS_SERVICE_ID),
 		Columns: awsRegionalColumns([]*plugin.Column{
 			{
 				Name:        "name",

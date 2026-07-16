@@ -6,9 +6,9 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/service/cloudfront"
 	"github.com/aws/aws-sdk-go-v2/service/cloudfront/types"
-	"github.com/turbot/steampipe-plugin-sdk/v5/grpc/proto"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin/transform"
+	"github.com/turbot/steampipe-plugin-sdk/v6/grpc/proto"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin/transform"
 )
 
 //// TABLE DEFINITION
@@ -37,6 +37,13 @@ func tableAwsCloudFrontDistribution(_ context.Context) *plugin.Table {
 			{
 				Func: getCloudFrontDistributionTags,
 				Tags: map[string]string{"service": "cloudfront", "action": "ListTagsForResource"},
+			},
+			{
+				Func: getCloudFrontDistributionMonitoringSubscription,
+				Tags: map[string]string{"service": "cloudfront", "action": "GetMonitoringSubscription"},
+				IgnoreConfig: &plugin.IgnoreConfig{
+					ShouldIgnoreErrorFunc: shouldIgnoreErrors([]string{"NoSuchMonitoringSubscription"}),
+				},
 			},
 		},
 		Columns: awsRegionalColumns([]*plugin.Column{
@@ -215,6 +222,13 @@ func tableAwsCloudFrontDistribution(_ context.Context) *plugin.Table {
 				Type:        proto.ColumnType_JSON,
 				Transform:   transform.FromField("ViewerCertificate", "Distribution.DistributionConfig.ViewerCertificate"),
 			},
+			{
+				Name:        "monitoring_subscription",
+				Description: "The monitoring subscription for the CloudFront distribution.",
+				Type:        proto.ColumnType_JSON,
+				Hydrate:     getCloudFrontDistributionMonitoringSubscription,
+				Transform:   transform.FromValue(),
+			},
 
 			// Standard columns for all tables
 			{
@@ -354,6 +368,45 @@ func getCloudFrontDistributionTags(ctx context.Context, d *plugin.QueryData, h *
 	}
 
 	return op, nil
+}
+
+func getCloudFrontDistributionMonitoringSubscription(ctx context.Context, d *plugin.QueryData, h *plugin.HydrateData) (interface{}, error) {
+	// Get client
+	svc, err := CloudFrontClient(ctx, d)
+	if err != nil {
+		plugin.Logger(ctx).Error("aws_cloudfront_distribution.getCloudFrontDistributionMonitoringSubscription", "client_error", err)
+		return nil, err
+	}
+
+	var distributionID string
+	if h.Item != nil {
+		switch item := h.Item.(type) {
+		case types.DistributionSummary:
+			distributionID = *item.Id
+		case cloudfront.GetDistributionOutput:
+			distributionID = *item.Distribution.Id
+		}
+	} else {
+		distributionID = d.EqualsQuals["id"].GetStringValue()
+	}
+
+	if strings.TrimSpace(distributionID) == "" {
+		return nil, nil
+	}
+
+	// Build the params
+	params := &cloudfront.GetMonitoringSubscriptionInput{
+		DistributionId: &distributionID,
+	}
+
+	// Get call
+	op, err := svc.GetMonitoringSubscription(ctx, params)
+	if err != nil {
+		plugin.Logger(ctx).Error("aws_cloudfront_distribution.getCloudFrontDistributionMonitoringSubscription", "api_error", err)
+		return nil, err
+	}
+
+	return op.MonitoringSubscription, nil
 }
 
 //// TRANSFORM FUNCTIONS

@@ -11,9 +11,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/acm/types"
 	"github.com/aws/smithy-go"
 
-	"github.com/turbot/steampipe-plugin-sdk/v5/grpc/proto"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin/transform"
+	"github.com/turbot/steampipe-plugin-sdk/v6/grpc/proto"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin/transform"
 )
 
 //// TABLE DEFINITION
@@ -88,6 +88,13 @@ func tableAwsAcmCertificate(_ context.Context) *plugin.Table {
 				Type:        proto.ColumnType_STRING,
 				Hydrate:     getAwsAcmCertificateAttributes,
 				Transform:   transform.FromField("Options.CertificateTransparencyLoggingPreference"),
+			},
+			{
+				Name:        "export",
+				Description: "Indicates whether certificate export is enabled. Set to 'ENABLED' to allow the certificate to be exported.",
+				Type:        proto.ColumnType_STRING,
+				Hydrate:     getAwsAcmCertificateAttributes,
+				Transform:   transform.FromField("Options.Export"),
 			},
 			{
 				Name:        "created_at",

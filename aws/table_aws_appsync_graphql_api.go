@@ -7,11 +7,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/appsync"
 	"github.com/aws/aws-sdk-go-v2/service/appsync/types"
 
-	appsyncv1 "github.com/aws/aws-sdk-go/service/appsync"
-
-	"github.com/turbot/steampipe-plugin-sdk/v5/grpc/proto"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin/transform"
+	"github.com/turbot/steampipe-plugin-sdk/v6/grpc/proto"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin/transform"
 )
 
 func tableAwsAppsyncGraphQLApi(_ context.Context) *plugin.Table {
@@ -36,7 +34,16 @@ func tableAwsAppsyncGraphQLApi(_ context.Context) *plugin.Table {
 				},
 			},
 		},
-		GetMatrixItemFunc: SupportedRegionMatrix(appsyncv1.EndpointsID),
+		HydrateConfig: []plugin.HydrateConfig{
+			{
+				Func: getAppsyncGraphQLApiCache,
+				Tags: map[string]string{"service": "appsync", "action": "GetApiCache"},
+				IgnoreConfig: &plugin.IgnoreConfig{
+					ShouldIgnoreErrorFunc: shouldIgnoreErrors([]string{"NotFoundException"}),
+				},
+			},
+		},
+		GetMatrixItemFunc: SupportedRegionMatrix(AWS_APPSYNC_SERVICE_ID),
 		Columns: awsRegionalColumns([]*plugin.Column{
 
 			{
@@ -144,6 +151,13 @@ func tableAwsAppsyncGraphQLApi(_ context.Context) *plugin.Table {
 				Name:        "enhanced_metrics_config",
 				Description: "The enhancedMetricsConfig object.",
 				Type:        proto.ColumnType_JSON,
+			},
+			{
+				Name:        "api_cache",
+				Description: "The ApiCache object.",
+				Type:        proto.ColumnType_JSON,
+				Hydrate:     getAppsyncGraphQLApiCache,
+				Transform:   transform.FromValue(),
 			},
 			{
 				Name:        "introspection_config",
@@ -273,4 +287,53 @@ func getAppsyncGraphqlApi(ctx context.Context, d *plugin.QueryData, h *plugin.Hy
 	}
 
 	return nil, nil
+}
+
+func getAppsyncGraphQLApiCache(ctx context.Context, d *plugin.QueryData, h *plugin.HydrateData) (interface{}, error) {
+	var apiId string
+	if h.Item != nil {
+		// If we have an item from the list, extract the API ID
+		switch api := h.Item.(type) {
+		case types.GraphqlApi:
+			apiId = *api.ApiId
+		case *types.GraphqlApi:
+			apiId = *api.ApiId
+		}
+		
+	} else {
+		// If this is a get call, use the key column
+		apiId = d.EqualsQualString("api_id")
+	}
+
+	if apiId == "" {
+		return nil, nil
+	}
+
+	// Create service
+	svc, err := AppSyncClient(ctx, d)
+	if err != nil {
+		plugin.Logger(ctx).Error("aws_appsync_graphql_api.getAppsyncGraphQLApiCache", "connection_error", err)
+		return nil, err
+	}
+	if svc == nil {
+		// Unsupported region, return no data
+		return nil, nil
+	}
+
+	// Using the actual GetApiCache API
+	input := appsync.GetApiCacheInput{
+		ApiId:      aws.String(apiId),
+	}
+
+	res, err := svc.GetApiCache(ctx, &input)
+	if err != nil {
+		plugin.Logger(ctx).Error("aws_appsync_graphql_api.getAppsyncGraphQLApiCache", "api_error", err)
+		return nil, err
+	}
+
+	if res != nil && res.ApiCache != nil {
+		return res.ApiCache, nil
+	}
+
+	return res, nil
 }

@@ -7,11 +7,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/inspector"
 	"github.com/aws/aws-sdk-go-v2/service/inspector/types"
 
-	inspectorv1 "github.com/aws/aws-sdk-go/service/inspector"
-
-	"github.com/turbot/steampipe-plugin-sdk/v5/grpc/proto"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin/transform"
+	"github.com/turbot/steampipe-plugin-sdk/v6/grpc/proto"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin/transform"
 )
 
 type ExclusionInfo = struct {
@@ -33,7 +31,7 @@ func tableAwsInspectorExclusion(_ context.Context) *plugin.Table {
 				{Name: "assessment_run_arn", Require: plugin.Optional},
 			},
 		},
-		GetMatrixItemFunc: SupportedRegionMatrix(inspectorv1.EndpointsID),
+		GetMatrixItemFunc: SupportedRegionMatrix(AWS_INSPECTOR_SERVICE_ID),
 		Columns: awsRegionalColumns([]*plugin.Column{
 			{
 				Name:        "arn",

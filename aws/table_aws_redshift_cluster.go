@@ -7,11 +7,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/redshift"
 	"github.com/aws/aws-sdk-go-v2/service/redshift/types"
 
-	redshiftv1 "github.com/aws/aws-sdk-go/service/redshift"
-
-	"github.com/turbot/steampipe-plugin-sdk/v5/grpc/proto"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin/transform"
+	"github.com/turbot/steampipe-plugin-sdk/v6/grpc/proto"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin/transform"
 )
 
 //// TABLE DEFINITION
@@ -42,7 +40,7 @@ func tableAwsRedshiftCluster(_ context.Context) *plugin.Table {
 				Tags: map[string]string{"service": "redshift", "action": "DescribeScheduledActions"},
 			},
 		},
-		GetMatrixItemFunc: SupportedRegionMatrix(redshiftv1.EndpointsID),
+		GetMatrixItemFunc: SupportedRegionMatrix(AWS_REDSHIFT_SERVICE_ID),
 		Columns: awsRegionalColumns([]*plugin.Column{
 			{
 				Name:        "cluster_identifier",
@@ -270,6 +268,12 @@ func tableAwsRedshiftCluster(_ context.Context) *plugin.Table {
 				Name:        "modify_status",
 				Description: "The status of a modify operation, if any, initiated for the cluster.",
 				Type:        proto.ColumnType_STRING,
+			},
+			{
+				Name:        "multi_az",
+				Description: "A boolean value that, if true, indicates that the cluster is deployed in two Availability Zones.",
+				Type:        proto.ColumnType_BOOL,
+				Transform:   transform.FromField("MultiAZ"),
 			},
 			{
 				Name:        "next_maintenance_window_start_time",

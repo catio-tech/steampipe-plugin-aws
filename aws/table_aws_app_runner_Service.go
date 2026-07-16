@@ -7,11 +7,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/apprunner"
 	"github.com/aws/aws-sdk-go-v2/service/apprunner/types"
 
-	apprunnerv1 "github.com/aws/aws-sdk-go/service/apprunner"
-
-	"github.com/turbot/steampipe-plugin-sdk/v5/grpc/proto"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin/transform"
+	"github.com/turbot/steampipe-plugin-sdk/v6/grpc/proto"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin/transform"
 )
 
 //// TABLE DEFINITION
@@ -33,7 +31,7 @@ func tableAwsAppRunnerService(_ context.Context) *plugin.Table {
 			Hydrate: listAwsAppRunnerServices,
 			Tags:    map[string]string{"service": "apprunner", "action": "ListServices"},
 		},
-		GetMatrixItemFunc: SupportedRegionMatrix(apprunnerv1.EndpointsID),
+		GetMatrixItemFunc: SupportedRegionMatrix(AWS_APPRUNNER_SERVICE_ID),
 		Columns: awsRegionalColumns([]*plugin.Column{
 			{
 				Name:        "service_name",

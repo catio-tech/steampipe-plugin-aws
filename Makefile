@@ -11,3 +11,7 @@ docker-build-steampipe:
 		-t local/steampipe:local \
 		-f docker/steampipe/Dockerfile \
 		.
+
+# Exclude Parliament IAM permissions
+dev:
+	go build -o $(STEAMPIPE_INSTALL_DIR)/plugins/hub.steampipe.io/plugins/turbot/aws@latest/steampipe-plugin-aws.plugin -tags "dev ${BUILD_TAGS}" *.go

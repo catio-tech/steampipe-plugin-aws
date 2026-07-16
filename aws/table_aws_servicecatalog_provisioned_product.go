@@ -8,12 +8,10 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/servicecatalog"
 	"github.com/aws/aws-sdk-go-v2/service/servicecatalog/types"
 
-	servicecatalogv1 "github.com/aws/aws-sdk-go/service/servicecatalog"
-
-	"github.com/turbot/steampipe-plugin-sdk/v5/grpc/proto"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin/transform"
-	"github.com/turbot/steampipe-plugin-sdk/v5/query_cache"
+	"github.com/turbot/steampipe-plugin-sdk/v6/grpc/proto"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin/transform"
+	"github.com/turbot/steampipe-plugin-sdk/v6/query_cache"
 )
 
 //// TABLE DEFINITION
@@ -79,7 +77,7 @@ func tableAwsServicecatalogProvisionedProduct(_ context.Context) *plugin.Table {
 				Tags: map[string]string{"service": "servicecatalog", "action": "DescribeProvisionedProduct"},
 			},
 		},
-		GetMatrixItemFunc: SupportedRegionMatrix(servicecatalogv1.EndpointsID),
+		GetMatrixItemFunc: SupportedRegionMatrix(AWS_SERVICECATALOG_SERVICE_ID),
 		Columns: awsRegionalColumns([]*plugin.Column{
 			{
 				Name:        "arn",
@@ -285,7 +283,7 @@ func getServiceCatalogProvisionedProduct(ctx context.Context, d *plugin.QueryDat
 	}
 
 	if id != "" && name != "" {
-		return nil, fmt.Errorf("Both ProvisionedProductName and ProvisionedProductId cannot be passed in the where clause simultaneously")
+		return nil, fmt.Errorf("both 'ProvisionedProductName' and 'ProvisionedProductId' cannot be passed in the where clause simultaneously")
 	}
 
 	// Create client

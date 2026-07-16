@@ -3,9 +3,10 @@ package aws
 import (
 	"context"
 
-	"github.com/turbot/steampipe-plugin-sdk/v5/grpc/proto"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin/transform"
+	"github.com/turbot/steampipe-plugin-sdk/v6/grpc/proto"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin/transform"
+	"github.com/turbot/steampipe-plugin-sdk/v6/query_cache"
 )
 
 func tableAwsCostByServiceDaily(_ context.Context) *plugin.Table {
@@ -16,12 +17,27 @@ func tableAwsCostByServiceDaily(_ context.Context) *plugin.Table {
 			Hydrate: listCostByServiceDaily,
 			Tags:    map[string]string{"service": "ce", "action": "GetCostAndUsage"},
 			KeyColumns: plugin.KeyColumnSlice{
-				{Name: "service", Operators: []string{"=", "<>"}, Require: plugin.Optional},
+				{
+					Name:      "service",
+					Operators: []string{"=", "<>"},
+					Require:   plugin.Optional,
+				},
+				{
+					Name:       "period_start",
+					Require:    plugin.Optional,
+					Operators:  []string{">", ">=", "=", "<", "<="},
+					CacheMatch: query_cache.CacheMatchExact,
+				},
+				{
+					Name:       "period_end",
+					Require:    plugin.Optional,
+					Operators:  []string{">", ">=", "=", "<", "<="},
+					CacheMatch: query_cache.CacheMatchExact,
+				},
 			},
 		},
 		Columns: awsGlobalRegionColumns(
 			costExplorerColumns([]*plugin.Column{
-
 				{
 					Name:        "service",
 					Description: "The name of the AWS service.",

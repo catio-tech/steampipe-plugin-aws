@@ -9,13 +9,11 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/lambda"
 	"github.com/aws/aws-sdk-go-v2/service/lambda/types"
 
-	lambdav1 "github.com/aws/aws-sdk-go/service/lambda"
-
 	"github.com/aws/smithy-go"
 
-	"github.com/turbot/steampipe-plugin-sdk/v5/grpc/proto"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin/transform"
+	"github.com/turbot/steampipe-plugin-sdk/v6/grpc/proto"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin/transform"
 )
 
 func tableAwsLambdaVersion(_ context.Context) *plugin.Table {
@@ -38,11 +36,15 @@ func tableAwsLambdaVersion(_ context.Context) *plugin.Table {
 				{Name: "function_name", Require: plugin.Optional},
 			},
 		},
-		GetMatrixItemFunc: SupportedRegionMatrix(lambdav1.EndpointsID),
+		GetMatrixItemFunc: SupportedRegionMatrix(AWS_LAMBDA_SERVICE_ID),
 		HydrateConfig: []plugin.HydrateConfig{
 			{
 				Func: getFunctionVersionPolicy,
 				Tags: map[string]string{"service": "lambda", "action": "GetPolicy"},
+			},
+			{
+				Func: getFunctionVersionCode,
+				Tags: map[string]string{"service": "lambda", "action": "GetFunction"},
 			},
 		},
 		Columns: awsRegionalColumns([]*plugin.Column{
@@ -268,6 +270,12 @@ func tableAwsLambdaVersion(_ context.Context) *plugin.Table {
 				Description: "The function's X-Ray tracing configuration.",
 				Type:        proto.ColumnType_JSON,
 			},
+			{
+				Name:        "code",
+				Description: "The deployment package of the function or version.",
+				Type:        proto.ColumnType_JSON,
+				Hydrate:     getFunctionVersionCode,
+			},
 
 			// Standard columns for all tables
 			{
@@ -442,6 +450,41 @@ func getFunctionVersionPolicy(ctx context.Context, d *plugin.QueryData, h *plugi
 			}
 		}
 		plugin.Logger(ctx).Error("aws_lambda_function.getFunctionVersionPolicy", "connection_error", err)
+		return nil, err
+	}
+
+	return op, nil
+}
+
+func getFunctionVersionCode(ctx context.Context, d *plugin.QueryData, h *plugin.HydrateData) (interface{}, error) {
+	version := h.Item.(types.FunctionConfiguration)
+
+	// Create Session
+	svc, err := LambdaClient(ctx, d)
+	if err != nil {
+		plugin.Logger(ctx).Error("aws_lambda_version.getFunctionVersionCode", "connection_error", err)
+		return nil, err
+	}
+
+	if svc == nil {
+		// Unsupported region check
+		return nil, nil
+	}
+
+	input := &lambda.GetFunctionInput{
+		FunctionName: aws.String(*version.FunctionName),
+		Qualifier:    aws.String(*version.Version),
+	}
+
+	op, err := svc.GetFunction(ctx, input)
+	if err != nil {
+		var ae smithy.APIError
+		if errors.As(err, &ae) {
+			if ae.ErrorCode() == "ResourceNotFoundException" {
+				return nil, nil
+			}
+		}
+		plugin.Logger(ctx).Error("aws_lambda_version.getFunctionVersionCode", "api_error", err)
 		return nil, err
 	}
 

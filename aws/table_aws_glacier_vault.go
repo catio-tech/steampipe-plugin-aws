@@ -9,13 +9,11 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/glacier"
 	"github.com/aws/aws-sdk-go-v2/service/glacier/types"
 
-	glacierv1 "github.com/aws/aws-sdk-go/service/glacier"
-
 	"github.com/aws/smithy-go"
 
-	"github.com/turbot/steampipe-plugin-sdk/v5/grpc/proto"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin/transform"
+	"github.com/turbot/steampipe-plugin-sdk/v6/grpc/proto"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin/transform"
 )
 
 //// TABLE DEFINITION
@@ -54,7 +52,7 @@ func tableAwsGlacierVault(_ context.Context) *plugin.Table {
 				Tags: map[string]string{"service": "glacier", "action": "ListTagsForVault"},
 			},
 		},
-		GetMatrixItemFunc: SupportedRegionMatrix(glacierv1.EndpointsID),
+		GetMatrixItemFunc: SupportedRegionMatrix(AWS_GLACIER_SERVICE_ID),
 		Columns: awsRegionalColumns([]*plugin.Column{
 			{
 				Name:        "vault_name",

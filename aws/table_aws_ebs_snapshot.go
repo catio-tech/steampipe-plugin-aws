@@ -2,16 +2,15 @@ package aws
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 
-	ec2v1 "github.com/aws/aws-sdk-go/service/ec2"
-
-	"github.com/turbot/steampipe-plugin-sdk/v5/grpc/proto"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin/transform"
+	"github.com/turbot/steampipe-plugin-sdk/v6/grpc/proto"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin/transform"
 )
 
 func tableAwsEBSSnapshot(_ context.Context) *plugin.Table {
@@ -66,7 +65,7 @@ func tableAwsEBSSnapshot(_ context.Context) *plugin.Table {
 				},
 			},
 		},
-		GetMatrixItemFunc: SupportedRegionMatrix(ec2v1.EndpointsID),
+		GetMatrixItemFunc: SupportedRegionMatrix(AWS_EC2_SERVICE_ID),
 		HydrateConfig: []plugin.HydrateConfig{
 			{
 				Func: getAwsEBSSnapshotCreateVolumePermissions,
@@ -100,6 +99,11 @@ func tableAwsEBSSnapshot(_ context.Context) *plugin.Table {
 				Name:        "volume_id",
 				Description: "The ID of the volume that was used to create the snapshot. Snapshots created by the CopySnapshot action have an arbitrary volume ID that should not be used for any purpose.",
 				Type:        proto.ColumnType_STRING,
+			},
+			{
+				Name:        "full_snapshot_size_in_bytes",
+				Description: "The full size of the snapshot, in bytes.",
+				Type:        proto.ColumnType_INT,
 			},
 			{
 				Name:        "encrypted",
@@ -340,13 +344,19 @@ func buildEbsSnapshotFilter(ctx context.Context, d *plugin.QueryData, h *plugin.
 
 	filterQuals := map[string]string{
 		"description": "description",
-		"encrypted":   "encrypted",
 		"owner_alias": "owner-alias",
 		"snapshot_id": "snapshot-id",
 		"state":       "status",
 		"progress":    "progress",
 		"volume_id":   "volume-id",
 		"volume_size": "volume-size",
+	}
+
+	if equalQuals["encrypted"] != nil {
+		filters = append(filters, types.Filter{
+			Name:   aws.String("encrypted"),
+			Values: []string{fmt.Sprint(equalQuals["encrypted"].GetBoolValue())},
+		})
 	}
 
 	for columnName, filterName := range filterQuals {

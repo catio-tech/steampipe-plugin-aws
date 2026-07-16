@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin"
 )
 
 type awsConfig struct {
@@ -16,6 +16,7 @@ type awsConfig struct {
 	SessionToken          *string  `hcl:"session_token"`
 	MaxErrorRetryAttempts *int     `hcl:"max_error_retry_attempts"`
 	MinErrorRetryDelay    *int     `hcl:"min_error_retry_delay"`
+	IgnoreErrorMessages   []string `hcl:"ignore_error_messages,optional"`
 	IgnoreErrorCodes      []string `hcl:"ignore_error_codes,optional"`
 	EndpointUrl           *string  `hcl:"endpoint_url"`
 	S3ForcePathStyle      *bool    `hcl:"s3_force_path_style"`
@@ -27,10 +28,14 @@ func ConfigInstance() interface{} {
 
 // GetConfig :: retrieve and cast connection config from query data
 func GetConfig(connection *plugin.Connection) awsConfig {
-	if connection == nil || connection.Config == nil {
+	if connection == nil {
 		return awsConfig{}
 	}
-	config, _ := connection.Config.(awsConfig)
+	raw := connection.GetConfig()
+	if raw == nil {
+		return awsConfig{}
+	}
+	config, _ := raw.(awsConfig)
 
 	if config.Regions != nil {
 		if len(config.Regions) == 0 {

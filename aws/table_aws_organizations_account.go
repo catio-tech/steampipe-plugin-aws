@@ -8,10 +8,10 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/organizations"
 	"github.com/aws/aws-sdk-go-v2/service/organizations/types"
 
-	"github.com/turbot/steampipe-plugin-sdk/v5/grpc/proto"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin/transform"
-	"github.com/turbot/steampipe-plugin-sdk/v5/query_cache"
+	"github.com/turbot/steampipe-plugin-sdk/v6/grpc/proto"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin/transform"
+	"github.com/turbot/steampipe-plugin-sdk/v6/query_cache"
 )
 
 // Table behavior:
@@ -80,8 +80,13 @@ func tableAwsOrganizationsAccount(_ context.Context) *plugin.Table {
 				Type:        proto.ColumnType_STRING,
 			},
 			{
+				Name:        "state",
+				Description: "The state of the account in the organization.",
+				Type:        proto.ColumnType_STRING,
+			},
+			{
 				Name:        "status",
-				Description: "The status of the account in the organization.",
+				Description: "The status of the account in the organization (deprecated).",
 				Type:        proto.ColumnType_STRING,
 			},
 			{
@@ -288,7 +293,7 @@ func listAllOusByParent(ctx context.Context, d *plugin.QueryData, svc *organizat
 		}
 
 		for _, unit := range output.OrganizationalUnits {
-			ouPath := strings.Replace(currentPath, "-", "_", -1) + "." + strings.Replace(*unit.Id, "-", "_", -1)
+			ouPath := strings.ReplaceAll(currentPath, "-", "_") + "." + strings.ReplaceAll(*unit.Id, "-", "_")
 			units = append(units, unit)
 
 			// Recursively list units for this child

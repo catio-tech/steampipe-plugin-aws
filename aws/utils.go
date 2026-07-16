@@ -17,8 +17,8 @@ import (
 
 	sagemakerTypes "github.com/aws/aws-sdk-go-v2/service/sagemaker/types"
 	"github.com/turbot/go-kit/types"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin"
-	"github.com/turbot/steampipe-plugin-sdk/v5/plugin/transform"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin"
+	"github.com/turbot/steampipe-plugin-sdk/v6/plugin/transform"
 )
 
 func arnToAkas(_ context.Context, d *transform.TransformData) (interface{}, error) {
@@ -87,6 +87,20 @@ func getLastPathElement(path string) string {
 	}
 	pathItems := strings.Split(path, "/")
 	return pathItems[len(pathItems)-1]
+}
+
+// removeDuplicates removes duplicates from a slice of strings.
+func removeDuplicates(strings []string) []string {
+	seen := make(map[string]bool)
+	result := []string{}
+
+	for _, s := range strings {
+		if _, ok := seen[s]; !ok {
+			seen[s] = true
+			result = append(result, s)
+		}
+	}
+	return result
 }
 
 func lastPathElement(_ context.Context, d *transform.TransformData) (interface{}, error) {
@@ -165,9 +179,9 @@ func getQualsValueByColumn(equalQuals plugin.KeyColumnQualMap, columnName string
 		if dataType == "boolean" {
 			switch q.Operator {
 			case "<>":
-				value = "false"
+				value = !q.Value.GetBoolValue()
 			case "=":
-				value = "true"
+				value = q.Value.GetBoolValue()
 			}
 		}
 		if dataType == "int64" {
