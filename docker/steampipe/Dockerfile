@@ -1,7 +1,10 @@
 # ---------------------------------------------------
 # Stage 1: Build your custom AWS plugin
 # ---------------------------------------------------
-FROM golang:1.26 AS plugin-builder
+FROM golang:1.26.5-alpine AS plugin-builder
+
+# build-base: CGO for pg_query; git: module fetches
+RUN apk add --no-cache git ca-certificates build-base
 
 WORKDIR /workspace
 
@@ -40,8 +43,10 @@ USER steampipe
 WORKDIR /home/steampipe
 ENV HOME=/home/steampipe
 
-# Install the Steampipe engine
-RUN sudo /bin/sh -c "$(curl -fsSL https://steampipe.io/install/steampipe.sh)"
+# Install the Steampipe engine, pinned so image rebuilds are reproducible.
+# Bump deliberately after checking plugin-protocol compatibility with the SDK
+# version in go.mod (plugin-sdk v6 works with CLI v2.x).
+RUN sudo /bin/sh -c "$(curl -fsSL https://steampipe.io/install/steampipe.sh)" -- v2.4.4
 
 # Install the csv pluginm its used to testing purposes
 RUN steampipe plugin install csv
