@@ -1,10 +1,11 @@
 # ---------------------------------------------------
 # Stage 1: Build your custom AWS plugin
 # ---------------------------------------------------
-FROM golang:1.26.5-alpine AS plugin-builder
-
-# build-base: CGO for pg_query; git: module fetches
-RUN apk add --no-cache git ca-certificates build-base
+# Chainguard Go: glibc (Wolfi), no perl, Go 1.26.5. Official
+# golang:*-bookworm images always pull in perl-base (Essential) and
+# have no slim variant — Hub flags those OS CVEs on the FROM line.
+# Pin by digest; public tags beyond :latest are limited.
+FROM cgr.dev/chainguard/go:latest@sha256:0dfefd80cb9ce8db4be95d20d324c56005f40116524cdc8b8410f46ecd4732cb AS plugin-builder
 
 WORKDIR /workspace
 
