@@ -486,6 +486,13 @@ func TestAnalyzeQueriesFromJSON(t *testing.T) {
 		Queries []TestQuery `json:"queries"`
 	}
 
+	// The fixture lives in the sibling extractor-steampipe repo, which is only
+	// checked out in the extractor CI pipeline. Skip (rather than fail) when absent
+	// so `go test ./...` is green on a normal plugin-only checkout and in this repo's CI.
+	if _, err := os.Stat(queryFile); os.IsNotExist(err) {
+		t.Skipf("query fixture %s not found (requires sibling extractor-steampipe checkout)", queryFile)
+	}
+
 	// Read the JSON file
 	file, err := os.ReadFile(queryFile)
 	assert.NoError(t, err, "Should be able to read queries.json")
