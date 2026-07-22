@@ -33,6 +33,7 @@ RUN apt-get update && \
       curl \
       unzip \
       sudo \
+      jq \
       gnupg && \
     rm -rf /var/lib/apt/lists/*
 
@@ -55,6 +56,10 @@ RUN steampipe plugin install csv
 # Install the Datadog plugin from Steampipe Hub
 RUN steampipe plugin install datadog
 
+# Install the Kubernetes plugin so the shared Steampipe pod can serve
+# k8s connections alongside aws (Spec #102, Phase 1).
+RUN steampipe plugin install kubernetes
+
 # Define plugin installation path
 ENV PLUGIN_DIR=/home/steampipe/.steampipe/plugins/hub.steampipe.io/plugins/turbot/aws@latest
 
@@ -69,17 +74,18 @@ COPY --from=plugin-builder \
 # Ensure the plugin binary is executable
 RUN sudo chmod +x $PLUGIN_DIR/aws.plugin
 
-# Create versions.json to register the plugin
-RUN echo '{\
-  "plugins": {\
-    "hub.steampipe.io/plugins/turbot/aws@latest": {\
-      "name": "aws",\
-      "version": "0.1.0",\
-      "struct_version": 20230502\
-    }\
-  },\
-  "struct_version": 20220411\
-}' > /home/steampipe/.steampipe/plugins/versions.json
+# Register the custom-built AWS plugin in versions.json.
+#
+# The csv/datadog/kubernetes installs above each wrote their own entry into
+# versions.json. The custom AWS plugin is COPY'd in (not installed via
+# `steampipe plugin install`), so it has no entry yet. We MERGE the aws@latest
+# entry into the existing file with jq instead of overwriting it — a bare
+# `echo {aws-only} > versions.json` would clobber the installed-plugin entries,
+# leaving csv/datadog/kubernetes binaries on disk but unregistered (and thus
+# never loaded by Steampipe).
+RUN jq '.plugins["hub.steampipe.io/plugins/turbot/aws@latest"] = {"name": "aws", "version": "0.1.0", "struct_version": 20230502}' \
+      /home/steampipe/.steampipe/plugins/versions.json > /tmp/versions.json && \
+    mv /tmp/versions.json /home/steampipe/.steampipe/plugins/versions.json
 
 # Launch Steampipe in the foreground
 CMD ["steampipe", "service", "start", "--foreground"]
