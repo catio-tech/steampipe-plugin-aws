@@ -2,6 +2,7 @@ package aws
 
 import (
 	"context"
+	"regexp"
 	"sync"
 	"testing"
 
@@ -140,5 +141,48 @@ func TestOnlyCatchAllMatchesEverything(t *testing.T) {
 			continue
 		}
 		assert.NotEmpty(t, def.Where, "rate limiter %q has an empty Where - only %q may match every call", def.Name, catchAllLimiterName)
+	}
+}
+
+// TestCatchAllDoesNotBindExistingServices pins the property that makes the
+// Bug #863 catch-all safe to add.
+//
+// Matching limiters are NOT mutually exclusive: the SDK collects every
+// Definition whose Scope values are present and whose Where is satisfied, and
+// MultiLimiter.Wait() reserves on all of them and waits the longest delay. The
+// catch-all therefore applies in addition to each specific limiter, and it
+// buckets per connection-region-service - i.e. across ALL actions of a service.
+//
+// So for the specific limiters to stay the binding constraint (and their
+// behaviour to stay unchanged), the catch-all's fill rate must exceed the sum
+// of the per-action fill rates of every service that is already limited. If
+// someone later adds per-action limiters whose total passes 200/s, the
+// catch-all would silently become that service's bottleneck - this test fails
+// first.
+func TestCatchAllDoesNotBindExistingServices(t *testing.T) {
+	defs := pluginRateLimiters(t)
+
+	catchAll := defs[len(defs)-1]
+	require.Equal(t, catchAllLimiterName, catchAll.Name)
+
+	// service name -> summed fill rate of its specific limiters
+	perService := map[string]float64{}
+	for _, def := range defs {
+		if def.Name == catchAllLimiterName {
+			continue
+		}
+		// the Where clauses are all of the form "service = '<name>' and ..."
+		m := regexp.MustCompile(`service = '([^']+)'`).FindStringSubmatch(def.Where)
+		require.Len(t, m, 2, "limiter %q has a Where this test cannot attribute to a service: %q", def.Name, def.Where)
+		perService[m[1]] += float64(def.FillRate)
+	}
+	require.NotEmpty(t, perService, "expected to attribute some limiters to services")
+
+	for service, total := range perService {
+		assert.LessOrEqualf(t, total, float64(catchAll.FillRate),
+			"service %q has specific limiters totalling %v calls/s, which exceeds the %v calls/s catch-all "+
+				"(%q buckets per connection-region-service, across all actions). The catch-all would become "+
+				"this service's bottleneck - raise it or re-scope it deliberately.",
+			service, total, float64(catchAll.FillRate), catchAllLimiterName)
 	}
 }

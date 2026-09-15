@@ -229,10 +229,26 @@ func Plugin(ctx context.Context) *plugin.Plugin {
 				// MaxAttempts=9, 25ms x 3^n backoff), collapsing read throughput to 2-4
 				// rows/s until the catiopipe 1800s absolute ceiling cut the scan. This
 				// catch-all makes "no limiter configured" mean 200 calls/s per
-				// connection-region-service instead of unbounded. Empty Where matches
-				// every call; a Definition earlier in this list with a matching Where takes
-				// precedence and is unaffected. Must be canaried in dev for a full
-				// extraction cycle before prod (design doc risk R3).
+				// connection-region-service instead of unbounded. An empty Where matches
+				// every call.
+				//
+				// NOTE: matching limiters do NOT override one another. The SDK
+				// (plugin/plugin_rate_limiter.go) collects EVERY Definition whose Scope
+				// values are all present and whose Where is satisfied, and
+				// MultiLimiter.Wait() reserves on all of them and waits the LONGEST delay.
+				// So this ceiling applies IN ADDITION to any specific limiter above, not
+				// instead of it. That is safe because 200/s is above the sum of the
+				// per-action fill rates of every service limited above (iam is the
+				// largest at 170/s), so those specific limiters remain the binding
+				// constraint for the calls they cover and their behaviour is unchanged.
+				// TestCatchAllDoesNotBindExistingServices pins that property so a future
+				// limiter addition cannot quietly make this catch-all the bottleneck.
+				//
+				// Also note this Definition is skipped for any call that has no "region"
+				// scope value, since the SDK requires all Scope keys to be present.
+				//
+				// Must be canaried in dev for a full extraction cycle before prod (design
+				// doc risk R3).
 				Name:           "aws_default_hydrate_ceiling",
 				FillRate:       200,
 				BucketSize:     200,
