@@ -219,6 +219,27 @@ func Plugin(ctx context.Context) *plugin.Plugin {
 				Scope:      []string{"connection", "region", "service", "action"},
 				Where:      "service = 'lambda' and action in ('ListFunctions', 'GetFunctionUrlConfig')",
 			},
+			{
+				// Bug #863: tables with no per-service limiter (sqs, athena, and every
+				// hydrate-heavy table not covered above) ran per-row hydrate calls with NO
+				// rate limit: MultiLimiter.Wait() returns 0 when no Definition matches, so
+				// calls fanned out to the SDK's 500-row semaphore unbounded. AWS throttled
+				// them and the SDK retryer absorbed every throttle silently (aws/service.go
+				// ~2033: RateLimiter = NoOpRateLimit{} disables the retry-token bucket;
+				// MaxAttempts=9, 25ms x 3^n backoff), collapsing read throughput to 2-4
+				// rows/s until the catiopipe 1800s absolute ceiling cut the scan. This
+				// catch-all makes "no limiter configured" mean 200 calls/s per
+				// connection-region-service instead of unbounded. Empty Where matches
+				// every call; a Definition earlier in this list with a matching Where takes
+				// precedence and is unaffected. Must be canaried in dev for a full
+				// extraction cycle before prod (design doc risk R3).
+				Name:           "aws_default_hydrate_ceiling",
+				FillRate:       200,
+				BucketSize:     200,
+				MaxConcurrency: 200,
+				Scope:          []string{"connection", "region", "service"},
+				Where:          "",
+			},
 		},
 		TableMap: map[string]*plugin.Table{
 			"aws_accessanalyzer_analyzer":                                  tableAwsAccessAnalyzer(ctx),

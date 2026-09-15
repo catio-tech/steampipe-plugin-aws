@@ -38,3 +38,9 @@ node_modules
 
 # Ignore dist folders
 dist/
+
+# Agent-local files
+.claude/
+.serena/
+CLAUDE.local.md
+.mcp.json
