@@ -1,11 +1,16 @@
 # ---------------------------------------------------
 # Stage 1: Build your custom AWS plugin
 # ---------------------------------------------------
-# Chainguard Go: glibc (Wolfi), no perl, Go 1.26.5. Official
+# Chainguard Go: glibc (Wolfi), no perl. Official
 # golang:*-bookworm images always pull in perl-base (Essential) and
 # have no slim variant — Hub flags those OS CVEs on the FROM line.
 # Pin by digest; public tags beyond :latest are limited.
 FROM cgr.dev/chainguard/go:latest@sha256:0dfefd80cb9ce8db4be95d20d324c56005f40116524cdc8b8410f46ecd4732cb AS plugin-builder
+
+# The pinned image ships Go 1.26.5, and Chainguard's public :latest has moved
+# on to Go 1.27, so pin the toolchain instead: go downloads go1.26.8 from the
+# module proxy (verified against GOSUMDB) and builds with it.
+ENV GOTOOLCHAIN=go1.26.8
 
 WORKDIR /workspace
 
