@@ -12,8 +12,13 @@ import (
 )
 
 // catchAllLimiterName is the Bug #863 prevention limiter: the last entry in
-// RateLimiters, with an empty Where so that it matches every call that no
-// earlier, more specific definition already covers.
+// RateLimiters, with an empty Where so that it matches EVERY call - including
+// calls that a more specific definition already covers. There is no precedence
+// between definitions: matching is order-independent at runtime (the SDK
+// iterates a map, plugin/plugin_rate_limiter.go:62) and limiters are additive
+// (a call reserves on all matching definitions and waits for the longest
+// delay). Its position in the slice is a convention, not a behaviour - see
+// TestCatchAllRateLimiterIsLast.
 const catchAllLimiterName = "aws_default_hydrate_ceiling"
 
 // expectedRateLimiterCount pins the size of the RateLimiters slice so a silent
@@ -25,6 +30,11 @@ var (
 	rateLimitersOnce sync.Once
 	rateLimiters     []*rate_limiter.Definition
 )
+
+// serviceWhereRe extracts the service name from a limiter Where clause, which
+// are all of the form "service = '<name>' and ...". Hoisted out of the loop in
+// TestCatchAllDoesNotBindExistingServices so it compiles once.
+var serviceWhereRe = regexp.MustCompile(`service = '([^']+)'`)
 
 // pluginRateLimiters builds the plugin once (table construction needs no AWS
 // credentials) and returns its rate limiter definitions.
@@ -69,7 +79,10 @@ func TestCatchAllRateLimiterIsLast(t *testing.T) {
 		}
 	}
 	require.Len(t, matches, 1, "expected exactly one %q definition", catchAllLimiterName)
-	assert.Equal(t, len(defs)-1, matches[0], "%q must be the LAST definition so every specific limiter takes precedence", catchAllLimiterName)
+	assert.Equal(t, len(defs)-1, matches[0],
+		"%q must be the LAST definition - a readability/convention pin from design item 14; matching is "+
+			"order-independent at runtime (the SDK iterates a map), so this guards the config's legibility, "+
+			"not its behaviour", catchAllLimiterName)
 
 	catchAll := defs[matches[0]]
 	assert.Equal(t, "", catchAll.Where, "catch-all must have an empty Where so it matches every call")
@@ -171,8 +184,7 @@ func TestCatchAllDoesNotBindExistingServices(t *testing.T) {
 		if def.Name == catchAllLimiterName {
 			continue
 		}
-		// the Where clauses are all of the form "service = '<name>' and ..."
-		m := regexp.MustCompile(`service = '([^']+)'`).FindStringSubmatch(def.Where)
+		m := serviceWhereRe.FindStringSubmatch(def.Where)
 		require.Len(t, m, 2, "limiter %q has a Where this test cannot attribute to a service: %q", def.Name, def.Where)
 		perService[m[1]] += float64(def.FillRate)
 	}
@@ -185,4 +197,53 @@ func TestCatchAllDoesNotBindExistingServices(t *testing.T) {
 				"this service's bottleneck - raise it or re-scope it deliberately.",
 			service, total, float64(catchAll.FillRate), catchAllLimiterName)
 	}
+}
+
+// TestCatchAllScopeIncludesRegion pins "region" in the catch-all's Scope.
+//
+// This is the load-bearing half of the ceiling's shape, and it cuts both ways:
+//
+//   - Keeping "region" is what makes the ceiling 200 calls/s PER REGION. Dropping
+//     it would leave a global-per-service 200 calls/s ceiling shared by all 488
+//     regional tables across every region a connection scans - a real throughput
+//     regression, not a tightening of the same bound.
+//   - Keeping "region" is also why the 98 tables with no GetMatrixItemFunc
+//     (every aws_iam_* table, plus cost_*/ce_*, cloudfront_*, globalaccelerator_*,
+//     health_*, route53_*, s3_*, shield_* and waf_*, among others) get NO ceiling
+//     from it: the SDK skips a Definition unless every Scope key has a value for
+//     the call, and those tables issue calls with no "region" value. They stay
+//     bounded only by whichever of their own limiters also omit "region" from
+//     their Scope, and then only for the actions those limiters name - the 18 iam
+//     tables by 170 calls/s across 7 of the 39 iam actions they call, 6
+//     cloudfront_* and 7 of the 8 route53_* tables by 5 calls/s each - and for
+//     the remaining 67 there is no limit at all.
+//
+// Widening coverage to those tables is a deliberate design decision, so any
+// future edit to this Scope has to confront this test rather than slip past it.
+func TestCatchAllScopeIncludesRegion(t *testing.T) {
+	defs := pluginRateLimiters(t)
+	catchAll := defs[len(defs)-1]
+	require.Equal(t, catchAllLimiterName, catchAll.Name)
+
+	assert.Containsf(t, catchAll.Scope, "region",
+		"%q must keep \"region\" in its Scope: without it the ceiling becomes a single global "+
+			"200 calls/s bucket per connection-service shared by all 488 regional tables. If you are "+
+			"removing it to cover the 98 tables that have no region scope value, that is a design "+
+			"change - make it deliberately, do not just delete this assertion.", catchAllLimiterName)
+
+	// The SDK drops the whole Definition when a scope key has no value for the
+	// call, so a call with no "region" (a no-GetMatrixItemFunc table) is not
+	// rate limited by the catch-all at all. Pin that this is still the case.
+	require.NoError(t, catchAll.Initialise())
+	noRegion := map[string]string{"connection": "aws", "service": "iam", "action": "GetRole"}
+	var missing []string
+	for _, key := range catchAll.Scope {
+		if _, ok := noRegion[key]; !ok {
+			missing = append(missing, key)
+		}
+	}
+	assert.Equalf(t, []string{"region"}, missing,
+		"expected %q to be skipped for a call with no region scope value (it is the only missing "+
+			"scope key); if this changed, the coverage gap documented on the Definition in plugin.go "+
+			"is now wrong", catchAllLimiterName)
 }
