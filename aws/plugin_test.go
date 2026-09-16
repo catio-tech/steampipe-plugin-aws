@@ -333,15 +333,11 @@ func TestCatchAllDoesNotBindExistingServices(t *testing.T) {
 //     regional tables across every region a connection scans - a real throughput
 //     regression, not a tightening of the same bound.
 //   - Keeping "region" is also why the 98 tables with no GetMatrixItemFunc
-//     (every aws_iam_* table, plus cost_*/ce_*, cloudfront_*, globalaccelerator_*,
-//     health_*, route53_*, s3_*, shield_* and waf_*, among others) get NO ceiling
-//     from it: the SDK skips a Definition unless every Scope key has a value for
-//     the call, and those tables issue calls with no "region" value. They stay
-//     bounded only by whichever of their own limiters also omit "region" from
-//     their Scope, and then only for the actions those limiters name - the 18 iam
-//     tables by 170 calls/s across 7 of the 39 iam actions they call, 6
-//     cloudfront_* and 7 of the 8 route53_* tables by 5 calls/s each - and for
-//     the remaining 67 there is no limit at all.
+//     get NO ceiling from it: the SDK skips a Definition unless every Scope key
+//     has a value for the call, and those tables issue calls with no "region"
+//     value. See the aws_default_hydrate_ceiling comment block in plugin.go for
+//     the full per-service breakdown of what those 98 tables are and what does
+//     still bound them - kept in one place so the numbers cannot drift apart.
 //
 // Widening coverage to those tables is a deliberate design decision, so any
 // future edit to this Scope has to confront this test rather than slip past it.
@@ -359,7 +355,6 @@ func TestCatchAllScopeIncludesRegion(t *testing.T) {
 	// The SDK drops the whole Definition when a scope key has no value for the
 	// call, so a call with no "region" (a no-GetMatrixItemFunc table) is not
 	// rate limited by the catch-all at all. Pin that this is still the case.
-	require.NoError(t, catchAll.Initialise())
 	noRegion := map[string]string{"connection": "aws", "service": "iam", "action": "GetRole"}
 	var missing []string
 	for _, key := range catchAll.Scope {
