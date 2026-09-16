@@ -951,15 +951,23 @@ func waitWithTimeout(wg *sync.WaitGroup, timeout time.Duration) bool {
 }
 
 // TestProcessObjectsWorkerContextTimeout tests that processing actually stops
-// after context cancellation, rather than continuing to process data
+// after context cancellation, rather than continuing to process data.
+//
+// Measurement note: resultsChan is deliberately UNBUFFERED. With a buffered
+// channel the worker races ahead of the monitor goroutine, so len(resultsChan)
+// at worker exit measures the monitor's unread backlog (pure scheduler lag),
+// not post-cancel sends. On a rendezvous channel every completed receive
+// implies its send handoff completed, so receive order matches send-completion
+// order with respect to cancel(): postCancelSends = finalCount - cancelThreshold
+// counts exactly the sends that completed after cancellation (give or take the
+// single handoff that may be in flight at the cancel moment).
 func TestProcessObjectsWorkerContextTimeout(t *testing.T) {
 	// Create test configuration
 	const (
-		totalLogLines    = 10000 // Number of sample log lines to generate
-		cancelThreshold  = 1000  // Cancel after processing this many items
-		maxPostCancel    = 200   // Maximum allowed items processed after cancellation
-		minItemsRequired = 100   // Minimum items that must be processed before cancellation
-		workerTimeout    = 2 * time.Second
+		totalLogLines   = 10000 // Number of sample log lines to generate
+		cancelThreshold = 1000  // Cancel after processing this many items
+		maxPostCancel   = 200   // Maximum allowed items processed after cancellation
+		workerTimeout   = 2 * time.Second
 	)
 
 	// Basic test setup
@@ -996,7 +1004,9 @@ func TestProcessObjectsWorkerContextTimeout(t *testing.T) {
 	)
 
 	// Setup test channels and pool
-	resultsChan := make(chan S3FlowLogEvent, totalLogLines) // Buffered to avoid blocking
+	// Unbuffered: a rendezvous channel makes every counted receive a completed
+	// send, which is what lets us measure post-cancel sends exactly.
+	resultsChan := make(chan S3FlowLogEvent)
 	errorChan := make(chan error, 5)
 	objectPool := NewObjectPoolDefault[s3types.Object]()
 	objectPool.Add(s3types.Object{
@@ -1007,14 +1017,16 @@ func TestProcessObjectsWorkerContextTimeout(t *testing.T) {
 	objectPool.Close() // No more objects will be added
 
 	// Synchronization primitives
-	processedCount := atomic.Int32{}  // Tracks items processed
-	cancelled := make(chan struct{})  // Signals when cancellation occurs
-	workerDone := make(chan struct{}) // Signals when worker completes
+	processedCount := atomic.Int32{}   // Tracks items processed
+	cancelled := make(chan struct{})   // Signals when cancellation occurs
+	workerDone := make(chan struct{})  // Signals when worker completes
+	monitorDone := make(chan struct{}) // Signals when the monitor stopped counting
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	// Start result monitoring goroutine
 	go func() {
+		defer close(monitorDone)
 		for {
 			select {
 			case event, ok := <-resultsChan:
@@ -1056,9 +1068,6 @@ func TestProcessObjectsWorkerContextTimeout(t *testing.T) {
 		t.Fatal("Test timed out waiting for cancellation")
 	}
 
-	// Record count at cancellation
-	countAtCancellation := int(processedCount.Load())
-
 	// Wait for worker to finish
 	select {
 	case <-workerDone:
@@ -1067,24 +1076,34 @@ func TestProcessObjectsWorkerContextTimeout(t *testing.T) {
 		t.Fatal("Worker did not exit within timeout period after cancellation")
 	}
 
-	// Calculate final metrics
-	itemsProcessedAfterCancel := len(resultsChan)
-	totalProcessed := countAtCancellation + itemsProcessedAfterCancel
+	// Wait for the monitor to stop counting, so processedCount is final and
+	// safely published to this goroutine.
+	<-monitorDone
+
+	// Calculate final metrics. The channel is unbuffered, so there is no
+	// backlog to add: every counted receive is a completed send.
+	finalCount := int(processedCount.Load())
+	totalProcessed := finalCount
+	postCancelSends := finalCount - cancelThreshold
 	expectedLogLines := totalLogLines - 1 // Subtract version line
 
 	// Log metrics for debugging
-	t.Logf("Items at cancellation: %d", countAtCancellation)
-	t.Logf("Items after cancellation: %d", itemsProcessedAfterCancel)
+	t.Logf("Items at cancellation: %d", cancelThreshold)
+	t.Logf("Sends completed after cancellation: %d", postCancelSends)
 	t.Logf("Total processed: %d of %d available", totalProcessed, expectedLogLines)
 
 	// Verify results
-	assert.Greater(t, countAtCancellation, minItemsRequired,
-		"Should process a meaningful number of items before cancellation")
+	assert.GreaterOrEqual(t, totalProcessed, cancelThreshold,
+		"Cancellation only fires once the threshold-th item has been received")
 
 	assert.Less(t, totalProcessed, expectedLogLines,
 		"Processing should stop before handling all available log lines")
 
-	assert.LessOrEqual(t, itemsProcessedAfterCancel, maxPostCancel,
+	// processObjectsWorker re-checks ctx.Err() every 100 scanned lines, so with
+	// linesSinceContextCheck in [0,100) at cancel() at most 100 further lines
+	// are scanned (at most one send each), plus at most one handoff already in
+	// flight: <= 101, comfortably inside maxPostCancel.
+	assert.LessOrEqual(t, postCancelSends, maxPostCancel,
 		"Should not process too many items after context cancellation")
 
 	// Verify no errors were reported
