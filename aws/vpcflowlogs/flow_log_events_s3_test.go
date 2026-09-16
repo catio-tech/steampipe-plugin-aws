@@ -1078,7 +1078,11 @@ func TestProcessObjectsWorkerContextTimeout(t *testing.T) {
 
 	// Wait for the monitor to stop counting, so processedCount is final and
 	// safely published to this goroutine.
-	<-monitorDone
+	select {
+	case <-monitorDone:
+	case <-time.After(workerTimeout):
+		t.Fatal("Monitor did not exit within timeout period after worker exit")
+	}
 
 	// Calculate final metrics. The channel is unbuffered, so there is no
 	// backlog to add: every counted receive is a completed send.
