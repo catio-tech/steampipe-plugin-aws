@@ -255,13 +255,14 @@ func Plugin(ctx context.Context) *plugin.Plugin {
 				// Those 98 stay bounded only by whichever of their OWN limiters also omit
 				// "region" from their Scope, and then only for the actions those limiters
 				// name: the 18 iam tables by the 7 action-scoped limiters above (170
-				// calls/s in total, but covering only 7 of the 39 distinct iam actions
-				// those tables call), the 6 cloudfront_* tables and 7 of the 8 route53_*
-				// tables by 5 calls/s each. The remaining 67 have no limit at all -
-				// including aws_route53_domain, which calls the route53domains service
-				// and so misses the aws_route53 limiter, and the 4 waf_* tables, whose
-				// aws_waf and aws_wafv2 limiters are themselves region-scoped and so are
-				// skipped for exactly the same reason this catch-all is.
+				// calls/s in total, but covering only 7 of the 39 distinct iam action
+				// tags those tables declare), the 6 cloudfront_* tables and 7 of the 8
+				// route53_* tables by one shared 5 calls/s bucket apiece. The remaining
+				// 67 have no limit at all - including aws_route53_domain, which calls
+				// the route53domains service and so misses the aws_route53 limiter, and
+				// the 4 waf_* tables, whose aws_waf and aws_wafv2 limiters are themselves
+				// region-scoped and so are skipped for exactly the same reason this
+				// catch-all is.
 				//
 				// Widening the scope to reach those 98 is design follow-up work, not a
 				// silent change: simply dropping "region" here would also convert this
@@ -277,11 +278,11 @@ func Plugin(ctx context.Context) *plugin.Plugin {
 				// sets STEAMPIPE_DIAGNOSTIC_LEVEL: "ALL" in helm/values.yaml, so the
 				// signal is readable in dev without a config change (it is deliberately
 				// off in values-prod.yaml, which is why the canary is a dev exercise).
-				// Note _ctx is only populated for a query that explicitly selects it -
+				// Note _ctx is only returned for a query that explicitly selects it -
 				// extraction queries use explicit column lists, so the catiopipe
 				// diagnostic probe script is what surfaces this. Before this limiter
-				// existed _ctx reported nothing for the uncovered services, because
-				// there was no limiter to report on.
+				// existed _ctx reported nothing for services that had no limiter of
+				// their own, because there was no limiter to report on.
 				Name:           "aws_default_hydrate_ceiling",
 				FillRate:       200,
 				BucketSize:     200,
