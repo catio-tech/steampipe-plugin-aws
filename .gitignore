@@ -41,6 +41,7 @@ dist/
 
 # Agent-local files
 .claude/
+.cursor/
 .serena/
 CLAUDE.local.md
 .mcp.json
