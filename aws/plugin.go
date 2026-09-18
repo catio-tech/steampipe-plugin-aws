@@ -232,6 +232,48 @@ func Plugin(ctx context.Context) *plugin.Plugin {
 				// connection-region-service instead of unbounded. An empty Where matches
 				// every call.
 				//
+				// THIS IS A CALL-RATE CEILING ONLY. The FillRate/BucketSize 200 token
+				// bucket IS the Bug #863 fix and it STAYS. There is deliberately no
+				// MaxConcurrency: adding one back re-opens Bug #875.
+				// TestCatchAllHasNoConcurrencyCap pins that.
+				//
+				// Bug #875: the first shipped version of this Definition also carried
+				// MaxConcurrency: 200, which handed a CONCURRENCY SEMAPHORE to the ~488
+				// regional tables that previously had none (only 7 of the 20 inherited
+				// limiters above set one at all). That is not a tighter form of the same
+				// bound - it is a different mechanism, with a head-of-line-blocking
+				// failure mode the token bucket does not have:
+				//
+				//   - The SDK acquires the semaphore slot BEFORE the rate-limit wait and
+				//     holds it THROUGH the call: hydrateCall.canStart acquires
+				//     (plugin/hydrate_call.go:87), then start -> rateLimit ->
+				//     MultiLimiter.Wait blocks with the slot still held (:96-124). A row
+				//     parked on a slow bucket - say the 15/s aws_lambda_get_policy limiter
+				//     above - occupies its slot for the entire wait.
+				//   - A row that cannot get a slot spins in startAllHydrateCalls'
+				//     time.Sleep(10 * time.Millisecond) retry loop, which has NO
+				//     ctx.Done() check (plugin/row_data.go:77-122). It is UNCANCELLABLE:
+				//     the caller's deadline cannot interrupt it, so the row does not fail
+				//     fast, it just never produces.
+				//   - The semaphore instance is shared process-wide per unique scope-value
+				//     tuple (rate_limiter/hydrate_limiter.go:21-38, instances cached by
+				//     plugin_rate_limiter.go:85-92), so the starvation is CROSS-QUERY: one
+				//     query holding 200 slots on (connection, us-east-1, lambda) blocks
+				//     every other query touching lambda in that region, for as long as it
+				//     holds them.
+				//
+				// The scope of this Definition - connection, region, service - is exactly
+				// the scope of that blocking, which is why it hit so broadly.
+				//
+				// In production that showed as catiopipe query_idle_timeout hits going
+				// 183 -> 429 on the first run-night after this image shipped, with 91% of
+				// them dying at rows_streamed=0 - dead before their FIRST row. That is the
+				// signature of a query that never got a slot, not of one that ran slowly;
+				// affected families were bimodal, finishing at their old P50 or never
+				// starting at all. A token bucket DELAYS calls; it does not hold a
+				// resource that another query needs in order to make progress. The rate
+				// ceiling is therefore kept and the semaphore is not.
+				//
 				// NOTE: matching limiters do NOT override one another. The SDK
 				// (plugin/plugin_rate_limiter.go) collects EVERY Definition whose Scope
 				// values are all present and whose Where is satisfied, and
@@ -282,12 +324,11 @@ func Plugin(ctx context.Context) *plugin.Plugin {
 				// diagnostic probe script is what surfaces this. Before this limiter
 				// existed _ctx reported nothing for the uncovered services, because
 				// there was no limiter to report on.
-				Name:           "aws_default_hydrate_ceiling",
-				FillRate:       200,
-				BucketSize:     200,
-				MaxConcurrency: 200,
-				Scope:          []string{"connection", "region", "service"},
-				Where:          "",
+				Name:       "aws_default_hydrate_ceiling",
+				FillRate:   200,
+				BucketSize: 200,
+				Scope:      []string{"connection", "region", "service"},
+				Where:      "",
 			},
 		},
 		TableMap: map[string]*plugin.Table{
