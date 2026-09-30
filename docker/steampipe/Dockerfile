@@ -53,7 +53,7 @@ ENV HOME=/home/steampipe
 # Install the Steampipe engine, pinned so image rebuilds are reproducible.
 # Bump deliberately after checking plugin-protocol compatibility with the SDK
 # version in go.mod (plugin-sdk v6 works with CLI v2.x).
-RUN sudo /bin/sh -c "$(curl -fsSL https://steampipe.io/install/steampipe.sh)" -- v2.4.4
+RUN sudo /bin/sh -c "$(curl -fsSL https://steampipe.io/install/steampipe.sh)" -- v2.4.7
 
 # Install the csv pluginm its used to testing purposes
 RUN steampipe plugin install csv
