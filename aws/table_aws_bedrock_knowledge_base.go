@@ -36,7 +36,7 @@ func tableAwsBedrockKnowledgeBase(_ context.Context) *plugin.Table {
 				Tags: map[string]string{"service": "bedrock", "action": "GetKnowledgeBase"},
 			},
 		},
-		GetMatrixItemFunc: SupportedRegionMatrix(AWS_BEDROCK_SERVICE_ID),
+		GetMatrixItemFunc: SupportedRegionMatrixWithExclusions(AWS_BEDROCK_SERVICE_ID, bedrockAgentExcludedRegions),
 		Columns: awsRegionalColumns([]*plugin.Column{
 			// Key columns
 			{

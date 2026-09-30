@@ -19,8 +19,13 @@ func tableAwsSchedulerSchedule(_ context.Context) *plugin.Table {
 		Get: &plugin.GetConfig{
 			KeyColumns: plugin.AllColumns([]string{"name", "group_name"}),
 			Hydrate:    getAwsSchedulerSchedule,
+			// The Get config also serves the column hydrate during a list.
+			// GetSchedule returns ValidationException when the caller cannot
+			// use the schedule's customer managed KMS key. Ignore it so the
+			// schedule row is still returned, with null detail columns,
+			// instead of failing the whole query.
 			IgnoreConfig: &plugin.IgnoreConfig{
-				ShouldIgnoreErrorFunc: shouldIgnoreErrors([]string{"ResourceNotFoundException"}),
+				ShouldIgnoreErrorFunc: shouldIgnoreErrors([]string{"ResourceNotFoundException", "ValidationException"}),
 			},
 			Tags: map[string]string{"service": "scheduler", "action": "GetSchedule"},
 		},
