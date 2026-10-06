@@ -363,10 +363,17 @@ func BedrockClient(ctx context.Context, d *plugin.QueryData) (*bedrock.Client, e
 	return bedrock.NewFromConfig(*cfg), nil
 }
 
+// bedrockAgentExcludedRegions are regions that serve Bedrock but not the
+// Bedrock Agent API. The endpoint data has no "bedrock-agent" service, so the
+// agent tables use the "bedrock" region list minus these. In me-central-1,
+// bedrock-agent.me-central-1.amazonaws.com does not resolve, and the DNS
+// failure fails the whole query.
+var bedrockAgentExcludedRegions = []string{"me-central-1"}
+
 // BedrockAgentClient returns the service client for AWS Bedrock Agent service
 func BedrockAgentClient(ctx context.Context, d *plugin.QueryData) (*bedrockagent.Client, error) {
 	// Get client config
-	cfg, err := getClientForQuerySupportedRegion(ctx, d, AWS_BEDROCK_SERVICE_ID)
+	cfg, err := getClientForQuerySupportedRegionWithExclusions(ctx, d, AWS_BEDROCK_SERVICE_ID, bedrockAgentExcludedRegions)
 	if err != nil {
 		return nil, err
 	}
