@@ -2,10 +2,13 @@ package aws
 
 import (
 	"context"
+	"errors"
+	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/scheduler"
 	"github.com/aws/aws-sdk-go-v2/service/scheduler/types"
+	"github.com/aws/smithy-go"
 
 	"github.com/turbot/steampipe-plugin-sdk/v6/grpc/proto"
 	"github.com/turbot/steampipe-plugin-sdk/v6/plugin"
@@ -25,7 +28,7 @@ func tableAwsSchedulerSchedule(_ context.Context) *plugin.Table {
 			// schedule row is still returned, with null detail columns,
 			// instead of failing the whole query.
 			IgnoreConfig: &plugin.IgnoreConfig{
-				ShouldIgnoreErrorFunc: shouldIgnoreErrors([]string{"ResourceNotFoundException", "ValidationException"}),
+				ShouldIgnoreErrorFunc: ignoreScheduleDetailErrors(),
 			},
 			Tags: map[string]string{"service": "scheduler", "action": "GetSchedule"},
 		},
@@ -241,4 +244,19 @@ func getAwsSchedulerSchedule(ctx context.Context, d *plugin.QueryData, h *plugin
 	}
 
 	return result, nil
+}
+
+// ignoreScheduleDetailErrors ignores ResourceNotFoundException (and the
+// connection's ignore_error_codes), and the ValidationException that GetSchedule
+// returns when the caller cannot use the schedule's customer managed KMS key.
+// Any other ValidationException still fails the query.
+func ignoreScheduleDetailErrors() plugin.ErrorPredicateWithContext {
+	notFound := shouldIgnoreErrors([]string{"ResourceNotFoundException"})
+	return func(ctx context.Context, d *plugin.QueryData, h *plugin.HydrateData, err error) bool {
+		var ae smithy.APIError
+		if errors.As(err, &ae) && ae.ErrorCode() == "ValidationException" && strings.Contains(ae.ErrorMessage(), "KMS key") {
+			return true
+		}
+		return notFound(ctx, d, h, err)
+	}
 }

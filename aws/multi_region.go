@@ -306,11 +306,19 @@ func listRegionsForServiceWithExclusions(ctx context.Context, d *plugin.QueryDat
 		plugin.Logger(ctx).Error("listRegionsForServiceWithExclusions", "connection_name", d.Connection.Name, "serviceID", serviceID, "excludeRegions", excludeRegions, "error", err)
 		return nil, err
 	}
-	serviceRegions := iRegions.([]string)
 	// Remove the excluded regions from the valid list
-	serviceRegions = helpers.RemoveFromStringSlice(serviceRegions, excludeRegions...)
+	serviceRegions := regionsWithout(iRegions.([]string), excludeRegions...)
 	plugin.Logger(ctx).Debug("listRegionsForServiceWithExclusions", "connection_name", d.Connection.Name, "serviceID", serviceID, "excludeRegions", excludeRegions, "serviceRegions", serviceRegions)
 	return serviceRegions, nil
+}
+
+// regionsWithout returns a copy of regions without the excluded ones, and never
+// changes regions itself: the region list of a service is memoized, and every
+// table of the connection shares the same slice. helpers.RemoveFromStringSlice
+// changes its slice in place, so removing from the cached list would hide the
+// excluded regions from the other tables of the service too.
+func regionsWithout(regions []string, exclude ...string) []string {
+	return helpers.RemoveFromStringSlice(slices.Clone(regions), exclude...)
 }
 
 // getClient is per-region, but Memoize() is per-connection, so a setup
