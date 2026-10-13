@@ -76,7 +76,7 @@ func tableAwsGlueConnection(_ context.Context) *plugin.Table {
 			},
 			{
 				Name:        "connection_properties",
-				Description: "These key-value pairs define parameters for the connection.",
+				Description: "These key-value pairs define parameters for the connection. The password is not returned.",
 				Type:        proto.ColumnType_JSON,
 			},
 			{
@@ -141,8 +141,11 @@ func listGlueConnections(ctx context.Context, d *plugin.QueryData, _ *plugin.Hyd
 			}
 		}
 	}
+	// HidePassword: Glue leaves the password out of the connection properties.
+	// Catio never needs it, and it must not reach the extraction output.
 	input := &glue.GetConnectionsInput{
-		MaxResults: aws.Int32(maxLimit),
+		MaxResults:   aws.Int32(maxLimit),
+		HidePassword: true,
 	}
 
 	if d.EqualsQuals["connection_type"] != nil {
@@ -207,7 +210,8 @@ func getGlueConnection(ctx context.Context, d *plugin.QueryData, _ *plugin.Hydra
 
 	// Build the params
 	params := &glue.GetConnectionInput{
-		Name: aws.String(name),
+		Name:         aws.String(name),
+		HidePassword: true,
 	}
 
 	// Get call
