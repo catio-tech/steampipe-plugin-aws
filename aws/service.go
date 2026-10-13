@@ -160,7 +160,6 @@ import (
 	"github.com/aws/smithy-go/logging"
 	"github.com/hashicorp/go-hclog"
 	"github.com/rs/dnscache"
-	"github.com/turbot/go-kit/helpers"
 	"github.com/turbot/steampipe-plugin-sdk/v6/memoize"
 	"github.com/turbot/steampipe-plugin-sdk/v6/plugin"
 	"golang.org/x/sync/semaphore"
@@ -1875,8 +1874,8 @@ func getClientForQuerySupportedRegionWithExclusions(ctx context.Context, d *plug
 		return nil, err
 	}
 
-	// Remove the excluded regions from the valid list
-	validRegions = helpers.RemoveFromStringSlice(validRegions, excludeRegions...)
+	// Remove the excluded regions from the valid list (a copy: the list is cached)
+	validRegions = regionsWithout(validRegions, excludeRegions...)
 
 	if !slices.Contains(validRegions, region) {
 		// We choose to ignore unsupported regions rather than returning an error
