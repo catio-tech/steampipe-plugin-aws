@@ -2039,10 +2039,11 @@ func getClientWithMaxRetries(ctx context.Context, d *plugin.QueryData, region st
 		o.RateLimiter = NoOpRateLimit{} // With no rate limiter
 		o.Backoff = NewExponentialJitterBackoff(minRetryDelay, maxRetries)
 	})
+	creds := cfg.Credentials
 	cfg.Retryer = func() aws.Retryer {
 		// UnknownError is the code returned for a 408 from the aws go sdk, these can be frequent on large accounts especially around SNS Topics, etc.
 		additionalErrors := []string{"UnknownError"}
-		return retry.AddWithErrorCodes(retryer, additionalErrors...)
+		return withExpiredTokenRetry(retry.AddWithErrorCodes(retryer, additionalErrors...), d.Connection.Name, creds)
 	}
 
 	// Plugin level config
@@ -2271,7 +2272,12 @@ func getBaseClientForAccountUncached(ctx context.Context, d *plugin.QueryData, h
 		configOptions = append(configOptions, config.WithSharedConfigProfile(profile))
 	}
 
-	if awsSpcConfig.AccessKey != nil && awsSpcConfig.SecretKey == nil {
+	if creds := hookCredentials(d.Connection.Name); creds != nil {
+		// The host gives the credentials (see credentials_hook.go); keys in the
+		// connection config, if any, are not used.
+		plugin.Logger(ctx).Debug("getBaseClientForAccountUncached", "connection_name", d.Connection.Name, "status", "credentials_hook")
+		configOptions = append(configOptions, config.WithCredentialsProvider(creds))
+	} else if awsSpcConfig.AccessKey != nil && awsSpcConfig.SecretKey == nil {
 		return nil, fmt.Errorf("partial credentials found in connection config, missing: secret_key")
 	} else if awsSpcConfig.SecretKey != nil && awsSpcConfig.AccessKey == nil {
 		return nil, fmt.Errorf("partial credentials found in connection config, missing: access_key")
