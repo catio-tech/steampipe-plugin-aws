@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -25,7 +26,8 @@ import (
 // The plugin calls the methods concurrently, from many table scans.
 type CredentialsHook interface {
 	// Provider returns the credentials provider of a connection, or nil when the
-	// hook has none. The plugin asks once per connection, keeps the provider for
+	// hook has none. The plugin asks when it first builds a client of the
+	// connection (two first builds at the same time may both ask), keeps one provider for
 	// the life of the process, and wraps it in one aws.CredentialsCache. The
 	// cache calls Retrieve again only when the Expires of the last set has
 	// passed (it has no expiry window), so Retrieve must return CanExpire=true,
@@ -55,17 +57,30 @@ var (
 	hookCaches sync.Map
 )
 
-// SetCredentialsHook sets the hook. Call it before the plugin serves any query
-// of a connection that the hook covers: the plugin builds the base client of
-// each connection once, and a base client built before the hook does not use
-// it (its queries then fail). nil removes the hook.
+// SetCredentialsHook sets the hook, once per process, before the plugin serves
+// any query of a connection that the hook covers: the plugin builds the base
+// client of each connection once, and a base client built before the hook does
+// not use it (its queries then fail). Setting the same hook again changes
+// nothing. A host that changes the credentials of a connection over time (the
+// fetchers, for example) gives one long-lived provider per connection name,
+// whose Retrieve finds the current set. nil removes the hook.
 func SetCredentialsHook(h CredentialsHook) {
+	if cur := getCredentialsHook(); cur != nil && h != nil && sameHook(cur, h) {
+		return
+	}
 	hookCaches.Clear()
 	if h == nil {
 		credentialsHook.Store(nil)
 		return
 	}
 	credentialsHook.Store(&h)
+}
+
+// sameHook compares two hooks without panicking on types that cannot be
+// compared.
+func sameHook(a, b CredentialsHook) bool {
+	ta, tb := reflect.TypeOf(a), reflect.TypeOf(b)
+	return ta == tb && ta.Comparable() && a == b
 }
 
 func getCredentialsHook() CredentialsHook {
@@ -184,9 +199,20 @@ func hookClientOptions(retryer func() aws.Retryer, connection string, cache *aws
 // newer service clients have it. Older clients insert it before Signing, after
 // GetIdentity, so every attempt of a call would be signed with the set that the
 // first attempt got, and a repeat after ExpiredToken could not use a new set.
-// A client with no ResolveAuthScheme, or no retry middleware, is left as it is.
+// It changes only a client whose Retry comes after ResolveAuthScheme: in the
+// newer clients, InterceptAttempt and RetryMetricsHeader follow Retry inside the
+// attempt loop, and must stay there.
 func retryBeforeAuth(stack *middleware.Stack) error {
-	if _, ok := stack.Finalize.Get("ResolveAuthScheme"); !ok {
+	retryAt, authAt := -1, -1
+	for i, id := range stack.Finalize.List() {
+		switch id {
+		case "Retry":
+			retryAt = i
+		case "ResolveAuthScheme":
+			authAt = i
+		}
+	}
+	if retryAt < 0 || authAt < 0 || retryAt < authAt {
 		return nil
 	}
 	m, err := stack.Finalize.Remove("Retry")

@@ -17,6 +17,7 @@ import (
 	cetypes "github.com/aws/aws-sdk-go-v2/service/costexplorer/types"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/aws/smithy-go"
+	"github.com/aws/smithy-go/middleware"
 	"github.com/hashicorp/go-hclog"
 	"github.com/turbot/steampipe-plugin-sdk/v6/connection"
 	"github.com/turbot/steampipe-plugin-sdk/v6/plugin"
@@ -418,5 +419,103 @@ func TestCredentialsHookOlderClientRepeatsWithTheNewSet(t *testing.T) {
 	}
 	if keys := h.seen(); len(keys) != 2 || keys[0] != "AKIAHOOKONE" || keys[1] != "AKIAHOOKTWO" {
 		t.Errorf("signed with %v, want [AKIAHOOKONE AKIAHOOKTWO]", keys)
+	}
+}
+
+// finalizeList returns the Finalize step of a call, after every option of the
+// client (the capture is the last API option).
+func finalizeList(t *testing.T, cfg *aws.Config, call func(cfg aws.Config, capture func(*middleware.Stack) error)) []string {
+	t.Helper()
+	var list []string
+	call(*cfg, func(s *middleware.Stack) error { list = s.Finalize.List(); return nil })
+	return list
+}
+
+// With the hook, a newer client (STS) keeps its exact middleware order, and an
+// older client (Cost Explorer) gets the newer clients' order.
+func TestCredentialsHookMiddlewareOrder(t *testing.T) {
+	hookTestEnv(t)
+	srv := httptest.NewServer(&stsServer{})
+	defer srv.Close()
+	ce := httptest.NewServer(&ceServer{})
+	defer ce.Close()
+
+	stsCall := func(cfg aws.Config, capture func(*middleware.Stack) error) {
+		c := sts.NewFromConfig(cfg, func(o *sts.Options) {
+			o.BaseEndpoint = aws.String(srv.URL)
+			o.APIOptions = append(o.APIOptions, capture)
+		})
+		_, _ = c.GetCallerIdentity(context.Background(), &sts.GetCallerIdentityInput{})
+	}
+	ceCall := func(cfg aws.Config, capture func(*middleware.Stack) error) {
+		c := costexplorer.NewFromConfig(cfg, func(o *costexplorer.Options) {
+			o.BaseEndpoint = aws.String(ce.URL)
+			o.APIOptions = append(o.APIOptions, capture)
+		})
+		_, _ = c.GetCostAndUsage(context.Background(), &costexplorer.GetCostAndUsageInput{
+			Granularity: cetypes.GranularityDaily, Metrics: []string{"UnblendedCost"},
+			TimePeriod: &cetypes.DateInterval{Start: aws.String("2026-10-01"), End: aws.String("2026-10-02")},
+		})
+	}
+	lists := func(hooked bool) (stsList, ceList []string) {
+		ak, sk := "AKIACONFIG", "secret"
+		conn := &plugin.Connection{Name: "plain"}
+		conn.SetConfig(awsConfig{AccessKey: &ak, SecretKey: &sk})
+		if hooked {
+			SetCredentialsHook(&fakeHook{conn: "hooked", keys: []string{"AKIAHOOKONE"}, repeat: true})
+			conn = &plugin.Connection{Name: "hooked"}
+			conn.SetConfig(awsConfig{})
+		} else {
+			SetCredentialsHook(nil)
+		}
+		ctx, d := queryData(t, conn)
+		cfg, err := getClientWithMaxRetries(ctx, d, "us-east-1", 4, 5*time.Millisecond)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return finalizeList(t, cfg, stsCall), finalizeList(t, cfg, ceCall)
+	}
+	t.Cleanup(func() { SetCredentialsHook(nil) })
+	stsPlain, cePlain := lists(false)
+	stsHooked, ceHooked := lists(true)
+	if strings.Join(stsHooked, ">") != strings.Join(stsPlain, ">") {
+		t.Errorf("STS order changed with the hook:\n%v\n%v", stsPlain, stsHooked)
+	}
+	if strings.Join(ceHooked, ">") == strings.Join(cePlain, ">") {
+		t.Errorf("Cost Explorer order did not change with the hook: %v", ceHooked)
+	}
+	pos := func(list []string, id string) int {
+		for i, v := range list {
+			if v == id {
+				return i
+			}
+		}
+		return -1
+	}
+	if r, a := pos(ceHooked, "Retry"), pos(ceHooked, "ResolveAuthScheme"); r < 0 || r > a {
+		t.Errorf("Cost Explorer with the hook: Retry at %d, ResolveAuthScheme at %d: %v", r, a, ceHooked)
+	}
+	if r, a := pos(cePlain, "Retry"), pos(cePlain, "ResolveAuthScheme"); r < a {
+		t.Errorf("Cost Explorer without the hook is not an older client any more: %v", cePlain)
+	}
+}
+
+// Setting the same hook again keeps the connections working.
+func TestSetTheSameHookAgain(t *testing.T) {
+	hookTestEnv(t)
+	hook := &fakeHook{conn: "hooked", keys: []string{"AKIAHOOKONE"}, repeat: true}
+	SetCredentialsHook(hook)
+	t.Cleanup(func() { SetCredentialsHook(nil) })
+	srv := httptest.NewServer(&stsServer{})
+	defer srv.Close()
+	conn := &plugin.Connection{Name: "hooked"}
+	conn.SetConfig(awsConfig{})
+	ctx, d := queryData(t, conn)
+	if err := callSTSWith(ctx, d, srv); err != nil {
+		t.Fatal(err)
+	}
+	SetCredentialsHook(hook)
+	if err := callSTSWith(ctx, d, srv); err != nil {
+		t.Fatalf("after setting the same hook again: %v", err)
 	}
 }
