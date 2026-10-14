@@ -76,11 +76,12 @@ func SetCredentialsHook(h CredentialsHook) {
 	credentialsHook.Store(&h)
 }
 
-// sameHook compares two hooks without panicking on types that cannot be
-// compared.
+// sameHook tells whether two hooks are the same pointer. Other hooks never
+// count as the same: comparing them could panic (a struct with an interface
+// field that holds a slice, for example).
 func sameHook(a, b CredentialsHook) bool {
 	ta, tb := reflect.TypeOf(a), reflect.TypeOf(b)
-	return ta == tb && ta.Comparable() && a == b
+	return ta == tb && ta.Kind() == reflect.Pointer && a == b
 }
 
 func getCredentialsHook() CredentialsHook {

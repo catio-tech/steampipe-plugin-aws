@@ -519,3 +519,21 @@ func TestSetTheSameHookAgain(t *testing.T) {
 		t.Fatalf("after setting the same hook again: %v", err)
 	}
 }
+
+// valueHook is a hook passed by value, with a field that cannot be compared.
+type valueHook struct{ extra any }
+
+func (valueHook) Provider(string) aws.CredentialsProvider    { return nil }
+func (valueHook) ExpiredToken(context.Context, string) bool { return false }
+
+// A hook that is not a pointer never counts as the same, and setting it again
+// does not panic.
+func TestSetAValueHookAgain(t *testing.T) {
+	t.Cleanup(func() { SetCredentialsHook(nil) })
+	h := valueHook{extra: []int{1}}
+	SetCredentialsHook(h)
+	SetCredentialsHook(h)
+	if getCredentialsHook() == nil {
+		t.Fatal("the hook is not set")
+	}
+}
