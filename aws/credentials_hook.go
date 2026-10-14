@@ -3,38 +3,64 @@ package aws
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/smithy-go"
+	"github.com/aws/smithy-go/middleware"
 )
 
 // CredentialsHook lets a host process that runs this plugin in-process (the
 // catiopipe-worker) give the plugin the AWS credentials of a connection. With a
 // hook, no keys go into the connection config, and the host renews them in
 // memory. The Steampipe path sets no hook, so nothing changes there.
+//
+// Once a hook is set, a connection that the hook gives no provider fails: it
+// never falls back to the process's own credentials (in the worker, the pod's
+// role), which would read Catio's account in place of the customer's.
+//
+// The plugin calls the methods concurrently, from many table scans.
 type CredentialsHook interface {
-	// Provider returns the credentials provider of a connection, or nil to use
-	// the connection config as before. The plugin wraps it in one
-	// aws.CredentialsCache per connection, so Retrieve runs again only when the
-	// Expires of the last set has passed, or after ExpiredToken.
+	// Provider returns the credentials provider of a connection, or nil when the
+	// hook has none. The plugin asks once per connection, keeps the provider for
+	// the life of the process, and wraps it in one aws.CredentialsCache. The
+	// cache calls Retrieve again only when the Expires of the last set has
+	// passed (it has no expiry window), so Retrieve must return CanExpire=true,
+	// and an Expires equal to the time when the host wants to give a different
+	// set (for example, when the next set is old enough to use), not the STS
+	// expiration.
 	Provider(connection string) aws.CredentialsProvider
 	// ExpiredToken is called when AWS refused a call of the connection because
 	// its security token expired. It returns true when the call may be
 	// repeated, after any wait that the host needs (for a set that is only
 	// seconds old, for example), and false when it must not be. ctx is the
-	// call's context. Before the repeat, the plugin drops its cached set, so the
-	// repeat uses the set that Provider returns then. The retryer's attempt
-	// limit bounds the repeats; the host decides how many of them it allows.
+	// call's context. The plugin drops its cached set in both cases, so the next
+	// attempt, and every later call, gets the set that Provider returns then.
+	//
+	// The call carries no attempt number and no sign of the set that it used:
+	// the host's rule is per set, not per call. The retryer's attempt limit
+	// (max_error_retry_attempts, 9 by default) bounds the repeats of one call,
+	// and the plugin adds no backoff to them. Many calls can fail at once, so
+	// the host must make one renewal out of many ExpiredToken calls.
 	ExpiredToken(ctx context.Context, connection string) bool
 }
 
-var credentialsHook atomic.Pointer[CredentialsHook]
+var (
+	credentialsHook atomic.Pointer[CredentialsHook]
+	// hookCaches holds the credentials cache of each connection that the hook
+	// gave a provider: connection name → *aws.CredentialsCache.
+	hookCaches sync.Map
+)
 
-// SetCredentialsHook sets the hook. Call it before the plugin serves any query:
-// the plugin builds the base client of each connection once. nil removes it.
+// SetCredentialsHook sets the hook. Call it before the plugin serves any query
+// of a connection that the hook covers: the plugin builds the base client of
+// each connection once, and a base client built before the hook does not use
+// it (its queries then fail). nil removes the hook.
 func SetCredentialsHook(h CredentialsHook) {
+	hookCaches.Clear()
 	if h == nil {
 		credentialsHook.Store(nil)
 		return
@@ -49,29 +75,43 @@ func getCredentialsHook() CredentialsHook {
 	return nil
 }
 
-// hookCredentials returns the cached credentials of a connection from the hook,
-// or nil when there is no hook or it has no provider for the connection.
-func hookCredentials(connection string) *aws.CredentialsCache {
+// errNoHookCredentials: a hook is set, but it gives the connection no
+// credentials.
+var errNoHookCredentials = errors.New("the credentials hook gives this connection no credentials")
+
+// hookCredentials returns the cached credentials of a connection from the hook.
+// It returns nil and no error when no hook is set, and an error when a hook is
+// set but has no provider for the connection.
+func hookCredentials(connection string) (*aws.CredentialsCache, error) {
 	h := getCredentialsHook()
 	if h == nil {
-		return nil
+		return nil, nil
+	}
+	if c, ok := hookCaches.Load(connection); ok {
+		return c.(*aws.CredentialsCache), nil
 	}
 	p := h.Provider(connection)
 	if p == nil {
-		return nil
+		return nil, fmt.Errorf("connection %q: %w", connection, errNoHookCredentials)
 	}
-	if c, ok := p.(*aws.CredentialsCache); ok {
-		return c
+	cache, ok := p.(*aws.CredentialsCache)
+	if !ok {
+		cache = aws.NewCredentialsCache(p)
 	}
-	return aws.NewCredentialsCache(p)
+	c, _ := hookCaches.LoadOrStore(connection, cache)
+	return c.(*aws.CredentialsCache), nil
 }
 
 // expiredTokenCodes are the error codes of a call that AWS refused because its
 // security token expired. Some services, for example Cost Explorer, also give
-// them for a token that is only seconds old.
+// them for a token that is only seconds old. EC2 gives RequestExpired for an
+// expired token (aws-sdk-go v1 counts it as an expired-credentials code for
+// EC2); other services give it for clock skew, which a repeat after the
+// SDK's clock-skew correction may also fix.
 var expiredTokenCodes = map[string]struct{}{
 	"ExpiredToken":          {},
 	"ExpiredTokenException": {},
+	"RequestExpired":        {},
 }
 
 func isExpiredToken(err error) bool {
@@ -108,10 +148,11 @@ func (r *expiredTokenRetryer) GetRetryToken(ctx context.Context, err error) (fun
 	if !isExpiredToken(err) {
 		return r.RetryerV2.GetRetryToken(ctx, err)
 	}
-	if !r.hook.ExpiredToken(ctx, r.connection) {
+	repeat := r.hook.ExpiredToken(ctx, r.connection)
+	r.cache.Invalidate()
+	if !repeat {
 		return nil, errors.New("the credentials hook does not repeat the call")
 	}
-	r.cache.Invalidate()
 	return func(error) error { return nil }, nil
 }
 
@@ -123,24 +164,34 @@ func (r *expiredTokenRetryer) RetryDelay(attempt int, err error) (time.Duration,
 	return r.RetryerV2.RetryDelay(attempt, err)
 }
 
-// withExpiredTokenRetry wraps a retryer when the connection gets its
-// credentials from the hook.
-func withExpiredTokenRetry(retryer aws.Retryer, connection string, creds aws.CredentialsProvider) aws.Retryer {
+// hookClientOptions are the client options of a connection whose credentials
+// come from the hook: the expired-token retryer, and the retry middleware
+// before the auth scheme, so that each attempt gets the credentials again.
+func hookClientOptions(retryer func() aws.Retryer, connection string, cache *aws.CredentialsCache) (func() aws.Retryer, func(*middleware.Stack) error) {
 	h := getCredentialsHook()
-	cache, ok := creds.(*aws.CredentialsCache)
-	if h == nil || !ok || h.Provider(connection) == nil {
-		return retryer
+	wrapped := func() aws.Retryer {
+		r := retryer()
+		v2, ok := r.(aws.RetryerV2)
+		if !ok || h == nil {
+			return r
+		}
+		return &expiredTokenRetryer{RetryerV2: v2, hook: h, connection: connection, cache: cache}
 	}
-	v2, ok := retryer.(aws.RetryerV2)
-	if !ok {
-		v2 = &retryerV1Adapter{retryer}
-	}
-	return &expiredTokenRetryer{RetryerV2: v2, hook: h, connection: connection, cache: cache}
+	return wrapped, retryBeforeAuth
 }
 
-// retryerV1Adapter gives a plain aws.Retryer the RetryerV2 method.
-type retryerV1Adapter struct{ aws.Retryer }
-
-func (a *retryerV1Adapter) GetAttemptToken(context.Context) (func(error) error, error) {
-	return a.GetInitialToken(), nil
+// retryBeforeAuth moves the retry middleware before ResolveAuthScheme, as the
+// newer service clients have it. Older clients insert it before Signing, after
+// GetIdentity, so every attempt of a call would be signed with the set that the
+// first attempt got, and a repeat after ExpiredToken could not use a new set.
+// A client with no ResolveAuthScheme, or no retry middleware, is left as it is.
+func retryBeforeAuth(stack *middleware.Stack) error {
+	if _, ok := stack.Finalize.Get("ResolveAuthScheme"); !ok {
+		return nil
+	}
+	m, err := stack.Finalize.Remove("Retry")
+	if err != nil {
+		return nil
+	}
+	return stack.Finalize.Insert(m, "ResolveAuthScheme", middleware.Before)
 }

@@ -158,6 +158,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/wellarchitected"
 	"github.com/aws/aws-sdk-go-v2/service/workspaces"
 	"github.com/aws/smithy-go/logging"
+	"github.com/aws/smithy-go/middleware"
 	"github.com/hashicorp/go-hclog"
 	"github.com/rs/dnscache"
 	"github.com/turbot/steampipe-plugin-sdk/v6/memoize"
@@ -2039,11 +2040,25 @@ func getClientWithMaxRetries(ctx context.Context, d *plugin.QueryData, region st
 		o.RateLimiter = NoOpRateLimit{} // With no rate limiter
 		o.Backoff = NewExponentialJitterBackoff(minRetryDelay, maxRetries)
 	})
-	creds := cfg.Credentials
 	cfg.Retryer = func() aws.Retryer {
 		// UnknownError is the code returned for a 408 from the aws go sdk, these can be frequent on large accounts especially around SNS Topics, etc.
 		additionalErrors := []string{"UnknownError"}
-		return withExpiredTokenRetry(retry.AddWithErrorCodes(retryer, additionalErrors...), d.Connection.Name, creds)
+		return retry.AddWithErrorCodes(retryer, additionalErrors...)
+	}
+
+	// With a credentials hook, the base client must use the hook's credentials,
+	// and the client gets the expired-token retryer (credentials_hook.go).
+	hookCreds, err := hookCredentials(d.Connection.Name)
+	if err != nil {
+		return nil, err
+	}
+	if hookCreds != nil {
+		if cfg.Credentials != aws.CredentialsProvider(hookCreds) {
+			return nil, fmt.Errorf("connection %q: its base client was built before the credentials hook was set", d.Connection.Name)
+		}
+		var retryFirst func(*middleware.Stack) error
+		cfg.Retryer, retryFirst = hookClientOptions(cfg.Retryer, d.Connection.Name, hookCreds)
+		cfg.APIOptions = append(slices.Clone(cfg.APIOptions), retryFirst)
 	}
 
 	// Plugin level config
@@ -2074,6 +2089,10 @@ func getClientWithMaxRetries(ctx context.Context, d *plugin.QueryData, region st
 			}
 			newCfg.Retryer = cfg.Retryer
 			newCfg.Region = cfg.Region
+			if hookCreds != nil {
+				newCfg.Credentials = cfg.Credentials
+				newCfg.APIOptions = cfg.APIOptions
+			}
 			cfg = newCfg
 		}
 	}
@@ -2272,11 +2291,16 @@ func getBaseClientForAccountUncached(ctx context.Context, d *plugin.QueryData, h
 		configOptions = append(configOptions, config.WithSharedConfigProfile(profile))
 	}
 
-	if creds := hookCredentials(d.Connection.Name); creds != nil {
-		// The host gives the credentials (see credentials_hook.go); keys in the
-		// connection config, if any, are not used.
+	hookCreds, err := hookCredentials(d.Connection.Name)
+	if err != nil {
+		return nil, err
+	}
+	if hookCreds != nil {
+		// The host gives the credentials (see credentials_hook.go). Keys in the
+		// connection config, and a profile's credentials, are not used; a
+		// profile still gives the region.
 		plugin.Logger(ctx).Debug("getBaseClientForAccountUncached", "connection_name", d.Connection.Name, "status", "credentials_hook")
-		configOptions = append(configOptions, config.WithCredentialsProvider(creds))
+		configOptions = append(configOptions, config.WithCredentialsProvider(hookCreds))
 	} else if awsSpcConfig.AccessKey != nil && awsSpcConfig.SecretKey == nil {
 		return nil, fmt.Errorf("partial credentials found in connection config, missing: secret_key")
 	} else if awsSpcConfig.SecretKey != nil && awsSpcConfig.AccessKey == nil {

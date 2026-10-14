@@ -7,11 +7,14 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/costexplorer"
+	cetypes "github.com/aws/aws-sdk-go-v2/service/costexplorer/types"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/aws/smithy-go"
 	"github.com/hashicorp/go-hclog"
@@ -30,9 +33,13 @@ type fakeHook struct {
 	repeat    bool
 	expired   int
 	retrieves int
+	providers int
 }
 
 func (f *fakeHook) Provider(connection string) aws.CredentialsProvider {
+	f.mu.Lock()
+	f.providers++
+	f.mu.Unlock()
 	if connection != f.conn {
 		return nil
 	}
@@ -107,21 +114,34 @@ func hookTestEnv(t *testing.T) {
 	t.Setenv("AWS_REGION", "us-east-1")
 }
 
-// callSTS makes one GetCallerIdentity call through the plugin's own client
-// setup for the connection (getClientWithMaxRetries), against srv.
-func callSTS(t *testing.T, conn *plugin.Connection, srv *httptest.Server) error {
+func queryData(t *testing.T, conn *plugin.Connection) (context.Context, *plugin.QueryData) {
 	t.Helper()
 	cache, err := connection.NewConnectionCache(conn.Name, 1<<20)
 	if err != nil {
 		t.Fatal(err)
 	}
-	d := &plugin.QueryData{Connection: conn, ConnectionCache: cache}
 	ctx := context.WithValue(context.Background(), context_key.Logger, hclog.NewNullLogger())
+	return ctx, &plugin.QueryData{Connection: conn, ConnectionCache: cache}
+}
+
+// callSTS makes one GetCallerIdentity call through the plugin's own client
+// setup for the connection (getClientWithMaxRetries), against srv.
+func callSTS(t *testing.T, conn *plugin.Connection, srv *httptest.Server) error {
+	t.Helper()
+	ctx, d := queryData(t, conn)
+	return callSTSWith(ctx, d, srv)
+}
+
+func callSTSWith(ctx context.Context, d *plugin.QueryData, srv *httptest.Server) error {
 	cfg, err := getClientWithMaxRetries(ctx, d, "us-east-1", 4, 5*time.Millisecond)
 	if err != nil {
-		t.Fatal(err)
+		return err
 	}
-	client := sts.NewFromConfig(*cfg, func(o *sts.Options) { o.BaseEndpoint = aws.String(srv.URL) })
+	client := sts.NewFromConfig(*cfg, func(o *sts.Options) {
+		if srv != nil {
+			o.BaseEndpoint = aws.String(srv.URL)
+		}
+	})
 	_, err = client.GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
 	return err
 }
@@ -195,7 +215,6 @@ func TestNoCredentialsHookKeepsTheConnectionConfig(t *testing.T) {
 		hook CredentialsHook
 	}{
 		{"no hook", nil},
-		{"hook for another connection", &fakeHook{conn: "other", keys: []string{"AKIAHOOKONE"}, repeat: true}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			hookTestEnv(t)
@@ -225,12 +244,179 @@ func TestIsExpiredToken(t *testing.T) {
 		{&smithy.GenericAPIError{Code: "ExpiredToken"}, true},
 		{&smithy.GenericAPIError{Code: "ExpiredTokenException"}, true},
 		{&smithy.GenericAPIError{Code: "AccessDeniedException"}, false},
-		{&smithy.GenericAPIError{Code: "RequestExpired"}, false},
+		{&smithy.GenericAPIError{Code: "RequestExpired"}, true},
+		{&smithy.GenericAPIError{Code: "SignatureDoesNotMatch"}, false},
 		{errors.New("dial tcp: i/o timeout"), false},
 		{nil, false},
 	} {
 		if got := isExpiredToken(tc.err); got != tc.want {
 			t.Errorf("isExpiredToken(%v) = %v, want %v", tc.err, got, tc.want)
 		}
+	}
+}
+
+// A hook with no provider for the connection fails closed: the call must not
+// fall back to the process's own credentials.
+func TestCredentialsHookFailsClosed(t *testing.T) {
+	hookTestEnv(t)
+	t.Setenv("AWS_ACCESS_KEY_ID", "AKIAPODROLE")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "secret")
+	SetCredentialsHook(&fakeHook{conn: "other", keys: []string{"AKIAHOOKONE"}, repeat: true})
+	t.Cleanup(func() { SetCredentialsHook(nil) })
+	srv := httptest.NewServer(&stsServer{})
+	defer srv.Close()
+
+	conn := &plugin.Connection{Name: "hooked"}
+	conn.SetConfig(awsConfig{})
+	if err := callSTS(t, conn, srv); !errors.Is(err, errNoHookCredentials) {
+		t.Fatalf("GetCallerIdentity = %v, want errNoHookCredentials", err)
+	}
+	if n := len(srv.Config.Handler.(*stsServer).seen()); n != 0 {
+		t.Errorf("requests = %d, want 0", n)
+	}
+}
+
+// A base client built before the hook was set does not use it: its queries
+// fail, and do not go out with the old credentials.
+func TestCredentialsHookSetAfterTheBaseClient(t *testing.T) {
+	hookTestEnv(t)
+	SetCredentialsHook(nil)
+	t.Cleanup(func() { SetCredentialsHook(nil) })
+	srv := httptest.NewServer(&stsServer{})
+	defer srv.Close()
+
+	ak, sk := "AKIACONFIG", "secret"
+	conn := &plugin.Connection{Name: "hooked"}
+	conn.SetConfig(awsConfig{AccessKey: &ak, SecretKey: &sk})
+	ctx, d := queryData(t, conn)
+	if err := callSTSWith(ctx, d, srv); err != nil {
+		t.Fatalf("before the hook: %v", err)
+	}
+	SetCredentialsHook(&fakeHook{conn: "hooked", keys: []string{"AKIAHOOKONE"}, repeat: true})
+	err := callSTSWith(ctx, d, srv)
+	if err == nil || !strings.Contains(err.Error(), "built before the credentials hook") {
+		t.Fatalf("after the hook: %v, want the built-before error", err)
+	}
+	if keys := srv.Config.Handler.(*stsServer).seen(); len(keys) != 1 {
+		t.Errorf("requests = %v, want only the one before the hook", keys)
+	}
+}
+
+// The plugin asks the hook for a connection's provider once, however many
+// clients it builds.
+func TestCredentialsHookProviderOnce(t *testing.T) {
+	hookTestEnv(t)
+	hook := &fakeHook{conn: "hooked", keys: []string{"AKIAHOOKONE"}, repeat: true}
+	SetCredentialsHook(hook)
+	t.Cleanup(func() { SetCredentialsHook(nil) })
+	conn := &plugin.Connection{Name: "hooked"}
+	conn.SetConfig(awsConfig{})
+	ctx, d := queryData(t, conn)
+	for range 50 {
+		if _, err := getClientWithMaxRetries(ctx, d, "us-east-1", 4, 5*time.Millisecond); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if hook.providers != 1 {
+		t.Errorf("Provider calls = %d, want 1", hook.providers)
+	}
+}
+
+// When the hook does not repeat, the cached set is still dropped: the next call
+// gets the set that the hook gives then.
+func TestCredentialsHookNoRepeatDropsTheSet(t *testing.T) {
+	hookTestEnv(t)
+	hook := &fakeHook{conn: "hooked", keys: []string{"AKIAHOOKONE", "AKIAHOOKTWO"}, repeat: false}
+	SetCredentialsHook(hook)
+	t.Cleanup(func() { SetCredentialsHook(nil) })
+	srv := httptest.NewServer(&stsServer{expired: 1})
+	defer srv.Close()
+	conn := &plugin.Connection{Name: "hooked"}
+	conn.SetConfig(awsConfig{})
+	ctx, d := queryData(t, conn)
+	if err := callSTSWith(ctx, d, srv); !isExpiredToken(err) {
+		t.Fatalf("first call = %v, want ExpiredToken", err)
+	}
+	if err := callSTSWith(ctx, d, srv); err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+	if keys := srv.Config.Handler.(*stsServer).seen(); len(keys) != 2 || keys[1] != "AKIAHOOKTWO" {
+		t.Errorf("signed with %v, want the second call with AKIAHOOKTWO", keys)
+	}
+}
+
+// endpoint_url builds the config again: it keeps the hook's credentials.
+func TestCredentialsHookWithEndpointURL(t *testing.T) {
+	hookTestEnv(t)
+	t.Setenv("AWS_ACCESS_KEY_ID", "AKIAPODROLE")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "secret")
+	hook := &fakeHook{conn: "hooked", keys: []string{"AKIAHOOKONE", "AKIAHOOKTWO"}, repeat: true}
+	SetCredentialsHook(hook)
+	t.Cleanup(func() { SetCredentialsHook(nil) })
+	srv := httptest.NewServer(&stsServer{expired: 1})
+	defer srv.Close()
+	conn := &plugin.Connection{Name: "hooked"}
+	conn.SetConfig(awsConfig{EndpointUrl: aws.String(srv.URL)})
+	ctx, d := queryData(t, conn)
+	if err := callSTSWith(ctx, d, nil); err != nil {
+		t.Fatalf("GetCallerIdentity: %v", err)
+	}
+	if keys := srv.Config.Handler.(*stsServer).seen(); len(keys) != 2 || keys[0] != "AKIAHOOKONE" || keys[1] != "AKIAHOOKTWO" {
+		t.Errorf("signed with %v, want [AKIAHOOKONE AKIAHOOKTWO]", keys)
+	}
+}
+
+// ceServer answers Cost Explorer GetCostAndUsage (JSON protocol): with
+// ExpiredTokenException for the first `expired` requests, then with success.
+type ceServer struct{ stsServer }
+
+func (s *ceServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	m := credentialKey.FindStringSubmatch(r.Header.Get("Authorization"))
+	key := ""
+	if m != nil {
+		key = m[1]
+	}
+	s.keys = append(s.keys, key)
+	n := len(s.keys)
+	s.mu.Unlock()
+	w.Header().Set("Content-Type", "application/x-amz-json-1.1")
+	if n <= s.expired {
+		w.Header().Set("X-Amzn-Errortype", "ExpiredTokenException")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"__type":"ExpiredTokenException","message":"The security token included in the request is expired"}`))
+		return
+	}
+	_, _ = w.Write([]byte(`{"ResultsByTime":[]}`))
+}
+
+// Cost Explorer's client (an older one) puts its retry middleware after
+// GetIdentity. The repeat must still use the hook's new set.
+func TestCredentialsHookOlderClientRepeatsWithTheNewSet(t *testing.T) {
+	hookTestEnv(t)
+	hook := &fakeHook{conn: "hooked", keys: []string{"AKIAHOOKONE", "AKIAHOOKTWO"}, repeat: true}
+	SetCredentialsHook(hook)
+	t.Cleanup(func() { SetCredentialsHook(nil) })
+	h := &ceServer{stsServer{expired: 1}}
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	conn := &plugin.Connection{Name: "hooked"}
+	conn.SetConfig(awsConfig{})
+	ctx, d := queryData(t, conn)
+	cfg, err := getClientWithMaxRetries(ctx, d, "us-east-1", 4, 5*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := costexplorer.NewFromConfig(*cfg, func(o *costexplorer.Options) { o.BaseEndpoint = aws.String(srv.URL) })
+	_, err = client.GetCostAndUsage(ctx, &costexplorer.GetCostAndUsageInput{
+		Granularity: cetypes.GranularityDaily,
+		Metrics:     []string{"UnblendedCost"},
+		TimePeriod:  &cetypes.DateInterval{Start: aws.String("2026-10-01"), End: aws.String("2026-10-02")},
+	})
+	if err != nil {
+		t.Fatalf("GetCostAndUsage: %v", err)
+	}
+	if keys := h.seen(); len(keys) != 2 || keys[0] != "AKIAHOOKONE" || keys[1] != "AKIAHOOKTWO" {
+		t.Errorf("signed with %v, want [AKIAHOOKONE AKIAHOOKTWO]", keys)
 	}
 }
