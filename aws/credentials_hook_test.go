@@ -523,7 +523,7 @@ func TestSetTheSameHookAgain(t *testing.T) {
 // valueHook is a hook passed by value, with a field that cannot be compared.
 type valueHook struct{ extra any }
 
-func (valueHook) Provider(string) aws.CredentialsProvider    { return nil }
+func (valueHook) Provider(string) aws.CredentialsProvider   { return nil }
 func (valueHook) ExpiredToken(context.Context, string) bool { return false }
 
 // A hook that is not a pointer never counts as the same, and setting it again
