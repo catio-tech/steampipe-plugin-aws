@@ -3,7 +3,6 @@ package aws
 import (
 	"context"
 	"errors"
-	"slices"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -367,17 +366,40 @@ func getAwsKmsKeyRotationStatus(ctx context.Context, d *plugin.QueryData, h *plu
 
 	keyData, err := svc.GetKeyRotationStatus(ctx, params)
 	if err != nil {
-		// For AWS managed KMS keys GetKeyRotationStatus API generates exceptions
 		var ae smithy.APIError
-		if errors.As(err, &ae) {
-			if slices.Contains([]string{"AccessDeniedException", "UnsupportedOperationException"}, ae.ErrorCode()) {
-				return &kms.GetKeyRotationStatusOutput{}, nil
-			}
-			return nil, err
+		if !errors.As(err, &ae) {
+			plugin.Logger(ctx).Error("aws_kms_key.getAwsKmsKeyRotationStatus", "api_error", err)
 		}
-		plugin.Logger(ctx).Error("aws_kms_key.getAwsKmsKeyRotationStatus", "api_error", err)
+		return kmsKeyRotationStatusError(err, builtWithHook.Load())
 	}
 	return keyData, nil
+}
+
+// kmsKeyRotationStatusError maps a GetKeyRotationStatus error. AWS answers
+// UnsupportedOperationException for keys that cannot rotate automatically
+// (asymmetric and HMAC keys, keys with imported material, keys in a custom key
+// store): the table has always read that as rotation off.
+// Without the per-call ignore checks (the Steampipe path), a denial reads as
+// rotation off and any other non-API error as no value, as before. With them
+// (withHook: an in-process host that reports ignored errors), the denial and
+// the non-API error are errors: the connection's ignore config decides, and a
+// denial is reported as a denied column instead of a false "off".
+func kmsKeyRotationStatusError(err error, withHook bool) (interface{}, error) {
+	var ae smithy.APIError
+	if !errors.As(err, &ae) {
+		if withHook {
+			return nil, err
+		}
+		// As before: the call's (nil) output, no error.
+		return (*kms.GetKeyRotationStatusOutput)(nil), nil
+	}
+	switch {
+	case ae.ErrorCode() == "UnsupportedOperationException":
+		return &kms.GetKeyRotationStatusOutput{}, nil
+	case ae.ErrorCode() == "AccessDeniedException" && !withHook:
+		return &kms.GetKeyRotationStatusOutput{}, nil
+	}
+	return nil, err
 }
 
 func getAwsKmsKeyTagging(ctx context.Context, d *plugin.QueryData, h *plugin.HydrateData) (interface{}, error) {
