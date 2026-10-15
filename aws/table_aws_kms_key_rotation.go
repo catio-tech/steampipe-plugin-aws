@@ -141,9 +141,12 @@ func listKmsKeyRotations(ctx context.Context, d *plugin.QueryData, h *plugin.Hyd
 		if err != nil {
 			// In the case of parent hydrate the ignore config seems to not work for the child table. So we need to handle it manually.
 			// Steampipe SDK issue ref: https://github.com/turbot/steampipe-plugin-sdk/issues/544
+			// With the per-call checks (an in-process host with an ignored-error
+			// hook), a hidden error would drop the key with no report: return it,
+			// so the scan fails and the host classifies it.
 			ignoreCodes := GetConfig(d.Connection).IgnoreErrorCodes
 			var ae smithy.APIError
-			if errors.As(err, &ae) {
+			if !builtWithHook.Load() && errors.As(err, &ae) {
 				if slices.Contains(ignoreCodes, ae.ErrorCode()) {
 					return nil, nil
 				}
