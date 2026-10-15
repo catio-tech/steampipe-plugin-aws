@@ -375,8 +375,10 @@ func getAwsKmsKeyRotationStatus(ctx context.Context, d *plugin.QueryData, h *plu
 	return keyData, nil
 }
 
-// kmsKeyRotationStatusError maps a GetKeyRotationStatus error. AWS managed
-// keys answer UnsupportedOperationException: rotation is off by AWS's rule.
+// kmsKeyRotationStatusError maps a GetKeyRotationStatus error. AWS answers
+// UnsupportedOperationException for keys that cannot rotate automatically
+// (asymmetric and HMAC keys, keys with imported material, keys in a custom key
+// store): the table has always read that as rotation off.
 // Without the per-call ignore checks (the Steampipe path), a denial reads as
 // rotation off and any other non-API error as no value, as before. With them
 // (withHook: an in-process host that reports ignored errors), the denial and

@@ -63,9 +63,11 @@ var (
 	builtWithHook atomic.Bool
 )
 
-// SetIgnoredErrorHook sets the hook. Set it before the host builds the plugin
-// (Plugin): only a plugin built while a hook is set gives each call its own
-// ignore check, which is what lets the plugin name the call. With no hook,
+// SetIgnoredErrorHook sets the hook, process-wide: one plugin per process.
+// Set it before the host builds the plugin (Plugin): only a plugin built while
+// a hook is set gives each call its own ignore check, which is what lets the
+// plugin name the call, and from then on aws_kms_key returns the denials that it
+// used to hide (builtWithHook stays set for the process). With no hook,
 // Plugin builds the tables exactly as before, and nothing is reported. nil
 // removes the hook (calls then report nothing).
 func SetIgnoredErrorHook(h IgnoredErrorHook) {
