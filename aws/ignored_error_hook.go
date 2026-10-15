@@ -4,6 +4,7 @@ package aws
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"sync/atomic"
 
@@ -24,13 +25,17 @@ type IgnoredError struct {
 	Table string
 	// Region is the scan's region, or "" for a table that has no region matrix.
 	Region string
-	// Call is "list" or "get" for the table's list and get calls,
+	// Call is "list" or "get" for the table's list and get calls (for a table with
+	// a ParentHydrate, "list" is the parent list call: the SDK checks only that
+	// one against the list's ignore config; a denied child list fails the scan),
 	// and the hydrate function's name (for example "getAwsKmsKeyRotationStatus")
 	// for a column's detail call.
 	Call string
 	// Columns are the columns that the call fills: for a detail call, the
-	// columns whose Hydrate is the call; empty for the list and get calls, whose
-	// failure leaves no row.
+	// columns whose Hydrate is the call; for a get call that hydrates a listed
+	// row, the columns whose Hydrate is the get. Empty for the list, and for a get
+	// that fetches the row itself: their failure leaves no row. A new slice on
+	// every report.
 	Columns []string
 	// Code is the AWS error code (smithy.APIError), or "" when the error has none.
 	Code string
@@ -42,12 +47,21 @@ type IgnoredError struct {
 
 // IgnoredErrorHook receives each ignored error. The plugin calls it from many
 // table scans at once, once per ignored error (so once per row for a detail
-// call), and waits for it: it must be fast and safe for concurrent use. It must
-// not keep the error text: the host gets only codes, because AWS error messages
-// name ARNs, users and emails.
+// call), and waits for it: it must be fast and safe for concurrent use. The
+// hook gets every error that the connection ignores, also the ones that mean
+// "no data" (NotFound, NoSuchTagSet): the host classifies them by Code. It
+// gets no error text: AWS error messages name ARNs, users and emails. A panic
+// in the hook is recovered and dropped, so it cannot fail the scan.
 type IgnoredErrorHook func(ctx context.Context, e IgnoredError)
 
-var ignoredErrorHook atomic.Pointer[IgnoredErrorHook]
+var (
+	ignoredErrorHook atomic.Pointer[IgnoredErrorHook]
+	// builtWithHook: Plugin gave every call its own ignore check (a hook was set
+	// when it built the tables). Code that turns a hidden denial into an error
+	// for the check to report (aws_kms_key) reads this, not the hook: without
+	// the per-call checks, nothing would report it.
+	builtWithHook atomic.Bool
+)
 
 // SetIgnoredErrorHook sets the hook. Set it before the host builds the plugin
 // (Plugin): only a plugin built while a hook is set gives each call its own
@@ -90,13 +104,16 @@ func getIgnoredErrorHook() IgnoredErrorHook {
 // a HydrateConfig gets one, with only its Func and the new check: the SDK
 // fills the rest from the table's defaults as before.
 func reportIgnoredErrors(p *plugin.Plugin) {
+	builtWithHook.Store(true)
 	pluginLevel := map[string]bool{}
 	for i := range p.HydrateConfig {
 		c := &p.HydrateConfig[i]
 		name := helpers.GetFunctionName(c.Func)
 		pluginLevel[name] = true
-		own := effectiveIgnore(c.IgnoreConfig, c.ShouldIgnoreError, p.DefaultIgnoreConfig)
-		c.IgnoreConfig = reportingIgnoreConfig(own, shortFuncName(name), nil, tagAction(c.Tags))
+		// The SDK initialises a plugin-level config with no table, so with no
+		// defaults.
+		own := effectiveIgnore(c.IgnoreConfig, c.ShouldIgnoreError)
+		c.IgnoreConfig = reportingIgnoreConfig(own, shortFuncName(name), nil, tagAction(c.Tags), false)
 		c.ShouldIgnoreError = nil
 	}
 	for _, t := range p.TableMap {
@@ -119,7 +136,13 @@ func reportTableIgnoredErrors(p *plugin.Plugin, t *plugin.Table, pluginLevel map
 
 	if t.List != nil {
 		own := effectiveIgnore(t.List.IgnoreConfig, t.List.ShouldIgnoreError, tableDefault)
-		t.List.IgnoreConfig = reportingIgnoreConfig(own, "list", nil, tagAction(t.List.Tags))
+		// With a ParentHydrate, the SDK checks the parent call against the list's
+		// config: its action is the parent's (ParentTags), not the child's.
+		action := tagAction(t.List.Tags)
+		if t.List.ParentHydrate != nil {
+			action = tagAction(t.List.ParentTags)
+		}
+		t.List.IgnoreConfig = reportingIgnoreConfig(own, "list", nil, action, false)
 		t.List.ShouldIgnoreError = nil
 	}
 	listName := ""
@@ -136,7 +159,7 @@ func reportTableIgnoredErrors(p *plugin.Plugin, t *plugin.Table, pluginLevel map
 		defaults = append(defaults, tableDefault)
 		own := effectiveIgnore(t.Get.IgnoreConfig, t.Get.ShouldIgnoreError, defaults...)
 		// The get call also hydrates columns when the list does not fill them.
-		t.Get.IgnoreConfig = reportingIgnoreConfig(own, "get", columns[getName], tagAction(t.Get.Tags))
+		t.Get.IgnoreConfig = reportingIgnoreConfig(own, "get", columns[getName], tagAction(t.Get.Tags), true)
 		t.Get.ShouldIgnoreError = nil
 	}
 
@@ -149,11 +172,17 @@ func reportTableIgnoredErrors(p *plugin.Plugin, t *plugin.Table, pluginLevel map
 		name := helpers.GetFunctionName(c.Func)
 		configured[name] = true
 		own := effectiveIgnore(c.IgnoreConfig, c.ShouldIgnoreError, tableDefault)
-		c.IgnoreConfig = reportingIgnoreConfig(own, shortFuncName(name), columns[name], tagAction(c.Tags))
+		c.IgnoreConfig = reportingIgnoreConfig(own, shortFuncName(name), columns[name], tagAction(c.Tags), false)
 		c.ShouldIgnoreError = nil
 	}
 	// Column hydrates with no HydrateConfig (not the get call, which has its
-	// own config, and not one that the plugin configures for every table).
+	// own config, and not one that the plugin configures for every table). A
+	// table that uses the legacy HydrateDependencies may not also have
+	// HydrateConfig (SDK validation), so its unconfigured hydrates stay as they
+	// are and report nothing.
+	if len(t.HydrateDependencies) > 0 {
+		return
+	}
 	added := map[string]bool{}
 	for _, col := range t.Columns {
 		if col == nil || col.Hydrate == nil {
@@ -166,7 +195,7 @@ func reportTableIgnoredErrors(p *plugin.Plugin, t *plugin.Table, pluginLevel map
 		added[name] = true
 		t.HydrateConfig = append(t.HydrateConfig, plugin.HydrateConfig{
 			Func:         col.Hydrate,
-			IgnoreConfig: reportingIgnoreConfig(tableDefault, shortFuncName(name), columns[name], ""),
+			IgnoreConfig: reportingIgnoreConfig(tableDefault, shortFuncName(name), columns[name], "", false),
 		})
 	}
 }
@@ -205,24 +234,38 @@ func effectiveIgnore(own *plugin.IgnoreConfig, legacy plugin.ErrorPredicate, def
 
 // reportingIgnoreConfig returns a config with one ShouldIgnoreErrorFunc that
 // decides as eff does (legacy predicate first, as WrapHydrate does) and reports
-// what it ignores.
-func reportingIgnoreConfig(eff *plugin.IgnoreConfig, call string, columns []string, action string) *plugin.IgnoreConfig {
+// what it ignores. isGet: the get call, which either fetches a row (no item
+// yet: its failure leaves no row, so no columns) or hydrates a listed row.
+func reportingIgnoreConfig(eff *plugin.IgnoreConfig, call string, columns []string, action string, isGet bool) *plugin.IgnoreConfig {
 	legacy, fn := eff.ShouldIgnoreError, eff.ShouldIgnoreErrorFunc
 	return &plugin.IgnoreConfig{
 		ShouldIgnoreErrorFunc: func(ctx context.Context, d *plugin.QueryData, h *plugin.HydrateData, err error) bool {
 			ignore := (legacy != nil && legacy(err)) || (fn != nil && fn(ctx, d, h, err))
 			if ignore {
-				if hook := getIgnoredErrorHook(); hook != nil {
-					hook(ctx, ignoredError(d, call, columns, action, err))
+				cols := columns
+				if isGet && (h == nil || h.Item == nil) {
+					cols = nil
 				}
+				report(ctx, ignoredError(d, call, cols, action, err))
 			}
 			return ignore
 		},
 	}
 }
 
+// report calls the hook, if any. A panic in the hook is dropped: inside the
+// SDK's WrapHydrate it would turn the ignored error into a failed scan.
+func report(ctx context.Context, e IgnoredError) {
+	hook := getIgnoredErrorHook()
+	if hook == nil {
+		return
+	}
+	defer func() { _ = recover() }()
+	hook(ctx, e)
+}
+
 func ignoredError(d *plugin.QueryData, call string, columns []string, action string, err error) IgnoredError {
-	e := IgnoredError{Call: call, Columns: columns, Action: action}
+	e := IgnoredError{Call: call, Columns: slices.Clone(columns), Action: action}
 	if d != nil {
 		if d.Connection != nil {
 			e.Connection = d.Connection.Name

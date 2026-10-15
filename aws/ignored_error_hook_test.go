@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/aws/aws-sdk-go-v2/service/kms"
 	"github.com/aws/smithy-go"
 	"github.com/hashicorp/go-hclog"
 	"github.com/stretchr/testify/assert"
@@ -39,7 +40,10 @@ func (r *recordHook) got() []IgnoredError {
 func setHookForTest(t *testing.T, h IgnoredErrorHook) {
 	t.Helper()
 	SetIgnoredErrorHook(h)
-	t.Cleanup(func() { SetIgnoredErrorHook(nil) })
+	t.Cleanup(func() {
+		SetIgnoredErrorHook(nil)
+		builtWithHook.Store(false)
+	})
 }
 
 func apiErr(code string) error { return &smithy.GenericAPIError{Code: code, Message: "made up"} }
@@ -188,8 +192,118 @@ func TestReportIgnoredErrorsNamesTheCall(t *testing.T) {
 		{Connection: "conn_1", Table: "fake_table", Region: "us-east-1", Call: "hydrateA", Columns: []string{"detail", "detail_2"}, Code: "AccessDeniedException", Action: "fake:DescribeThing"},
 		{Connection: "conn_1", Table: "fake_table", Region: "us-east-1", Call: "hydrateB", Columns: []string{"tags"}, Code: "AccessDenied"},
 		{Connection: "conn_1", Table: "fake_table", Region: "us-east-1", Call: "list", Code: "AccessDenied", Action: "fake:ListThings"},
-		{Connection: "conn_1", Table: "fake_table", Region: "us-east-1", Call: "get", Columns: []string{"get_only"}, Code: "NotFoundException"},
+		{Connection: "conn_1", Table: "fake_table", Region: "us-east-1", Call: "get", Code: "NotFoundException"},
 	}, rec.got(), "one report per ignored error, none for an error that is not ignored")
+}
+
+// A get that hydrates a listed row (an item exists) names the columns that it
+// fills; a get that fetches the row (no item yet) names none: the row is lost.
+func TestGetReportsColumnsOnlyForAListedRow(t *testing.T) {
+	rec := &recordHook{}
+	setHookForTest(t, rec.hook)
+	p, tbl := fakePlugin()
+	reportIgnoredErrors(p)
+	ctx := context.WithValue(context.Background(), context_key.Logger, hclog.NewNullLogger())
+	d := &plugin.QueryData{Table: tbl}
+	assert.True(t, tbl.Get.IgnoreConfig.ShouldIgnoreErrorFunc(ctx, d, nil, apiErr("NotFoundException")))
+	assert.True(t, tbl.Get.IgnoreConfig.ShouldIgnoreErrorFunc(ctx, d, &plugin.HydrateData{Item: "listed"}, apiErr("NotFoundException")))
+	got := rec.got()
+	require.Len(t, got, 2)
+	assert.Nil(t, got[0].Columns, "a get that fetches the row")
+	assert.Equal(t, []string{"get_only"}, got[1].Columns, "a get that hydrates a listed row")
+
+	// Each report has its own slice.
+	got[1].Columns[0] = "changed"
+	assert.True(t, tbl.Get.IgnoreConfig.ShouldIgnoreErrorFunc(ctx, d, &plugin.HydrateData{Item: "listed"}, apiErr("NotFoundException")))
+	assert.Equal(t, []string{"get_only"}, rec.got()[2].Columns)
+}
+
+func listParentFake(context.Context, *plugin.QueryData, *plugin.HydrateData) (any, error) {
+	return nil, nil
+}
+
+// The SDK checks a ParentHydrate's error against the list's config: the report
+// names the parent's action, not the child's.
+func TestParentListReportsTheParentAction(t *testing.T) {
+	rec := &recordHook{}
+	setHookForTest(t, rec.hook)
+	p, tbl := fakePlugin()
+	tbl.List.ParentHydrate = listParentFake
+	tbl.List.ParentTags = map[string]string{"service": "fake", "action": "ListParents"}
+	reportIgnoredErrors(p)
+	assert.True(t, callPredicate(tbl.List.IgnoreConfig, &plugin.QueryData{Table: tbl}, apiErr("AccessDenied")))
+	require.Len(t, rec.got(), 1)
+	assert.Equal(t, "fake:ListParents", rec.got()[0].Action)
+
+	// No ParentTags: no action, never the child's.
+	rec2 := &recordHook{}
+	setHookForTest(t, rec2.hook)
+	p, tbl = fakePlugin()
+	tbl.List.ParentHydrate = listParentFake
+	reportIgnoredErrors(p)
+	assert.True(t, callPredicate(tbl.List.IgnoreConfig, &plugin.QueryData{Table: tbl}, apiErr("AccessDenied")))
+	require.Len(t, rec2.got(), 1)
+	assert.Empty(t, rec2.got()[0].Action)
+}
+
+// A panicking hook cannot turn an ignored error into a failed scan.
+func TestHookPanicIsDropped(t *testing.T) {
+	setHookForTest(t, func(context.Context, IgnoredError) { panic("boom") })
+	p, tbl := fakePlugin()
+	reportIgnoredErrors(p)
+	assert.NotPanics(t, func() {
+		assert.True(t, callPredicate(tbl.List.IgnoreConfig, &plugin.QueryData{Table: tbl}, apiErr("AccessDenied")))
+	})
+}
+
+// A table with the legacy HydrateDependencies gets no added HydrateConfig (the
+// SDK refuses a table that has both).
+func TestLegacyHydrateDependenciesTableIsLeftAlone(t *testing.T) {
+	setHookForTest(t, (&recordHook{}).hook)
+	p, tbl := fakePlugin()
+	tbl.HydrateConfig = nil
+	tbl.HydrateDependencies = []plugin.HydrateDependencies{{Func: hydrateA}}
+	reportIgnoredErrors(p)
+	assert.Empty(t, tbl.HydrateConfig)
+	assert.NotNil(t, tbl.List.IgnoreConfig, "its list still reports")
+}
+
+func TestKmsKeyRotationStatusError(t *testing.T) {
+	plain := errors.New("dial tcp: timeout")
+	for _, tc := range []struct {
+		name      string
+		err       error
+		withHook  bool
+		wantOff   bool // the empty output: rotation off
+		wantError bool
+	}{
+		{"unsupported, no hook", apiErr("UnsupportedOperationException"), false, true, false},
+		{"unsupported, hook", apiErr("UnsupportedOperationException"), true, true, false},
+		{"denied, no hook: as before", apiErr("AccessDeniedException"), false, true, false},
+		{"denied, hook: an error to report", apiErr("AccessDeniedException"), true, false, true},
+		{"other API error", apiErr("KMSInternalException"), false, false, true},
+		{"other API error, hook", apiErr("KMSInternalException"), true, false, true},
+		{"non-API error, no hook: as before", plain, false, false, false},
+		{"non-API error, hook", plain, true, false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			out, err := kmsKeyRotationStatusError(tc.err, tc.withHook)
+			if tc.wantError {
+				assert.Equal(t, tc.err, err)
+				assert.Nil(t, out)
+				return
+			}
+			require.NoError(t, err)
+			o, ok := out.(*kms.GetKeyRotationStatusOutput)
+			require.True(t, ok, "the result is the call's output type, as before")
+			if tc.wantOff {
+				assert.NotNil(t, o)
+				assert.False(t, o.KeyRotationEnabled)
+			} else {
+				assert.Nil(t, o)
+			}
+		})
+	}
 }
 
 func TestReportIgnoredErrorsClearsLegacyChecks(t *testing.T) {
@@ -222,10 +336,12 @@ func TestNoReportWithoutHookAtCallTime(t *testing.T) {
 // path (the old extraction path) uses this fork too.
 func TestPluginWithoutHookIsUnchanged(t *testing.T) {
 	SetIgnoredErrorHook(nil)
-	kms := Plugin(context.Background()).TableMap["aws_kms_key"]
-	assert.Len(t, kms.HydrateConfig, 5)
-	assert.Nil(t, kms.List.IgnoreConfig)
-	assert.NotNil(t, kms.Get.IgnoreConfig.ShouldIgnoreErrorFunc)
+	builtWithHook.Store(false)
+	key := Plugin(context.Background()).TableMap["aws_kms_key"]
+	assert.Len(t, key.HydrateConfig, 5)
+	assert.Nil(t, key.List.IgnoreConfig)
+	assert.NotNil(t, key.Get.IgnoreConfig.ShouldIgnoreErrorFunc)
+	assert.False(t, builtWithHook.Load())
 }
 
 // sampleErrors are the codes that the aws plugin's checks name, and one error
