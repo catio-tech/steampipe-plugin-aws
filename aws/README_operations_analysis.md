@@ -1,22 +1,12 @@
 # AWS Operations Analyzer
 
-This is one of the two test tools that validate that our IAM policy allows all the queries in our `extractor-steampipe` project. This test is designed to statically analyze Steampipe table definitions and from the plugin's source code and SQL queries from Catio's JSON definition. It determines the complete set of AWS API operations that could be called by a set of queries and tests them against the AWS IAM Policy Simulator.
+The analyzer statically analyzes the plugin's Steampipe table definitions and a SQL query. It determines the complete set of AWS API operations that the query could call.
 
 ## Quickstart
 
-Run from the root directory of this project. Assumes you have the `extractor-steampipe` project cloned in a sibling directory. If not, change the `queryFile` path in `aws/operations_analyzer_test.go`
-
-Run only the tests that validate the queries from json:
+Run the unit tests from the root directory of this project. They need no AWS access.
 
 ```sh
-setDev
-go test -v -run TestAnalyzeQueriesFromJSON ./aws
-```
-
-Run all the unit tests for the feature:
-
-```sh
-setDev
 go test -v -run TestAnalyze ./aws
 ```
 
