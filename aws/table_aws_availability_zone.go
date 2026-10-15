@@ -132,7 +132,10 @@ func listAwsAvailabilityZones(ctx context.Context, d *plugin.QueryData, h *plugi
 	resp, err := svc.DescribeAvailabilityZones(ctx, input)
 	if err != nil {
 		// Due to parent hydrate usage, the default ignore error codes configured in connection config are not respected, so we need to handle it here
-		if shouldIgnoreErrorPluginDefault()(ctx, d, h, err) {
+		// With the per-call checks (an in-process host with an ignored-error
+		// hook), a hidden error would read as an empty region: return it, so the
+		// scan fails and the host classifies it (a denial is "denied").
+		if !builtWithHook.Load() && shouldIgnoreErrorPluginDefault()(ctx, d, h, err) {
 			return nil, nil
 		}
 		plugin.Logger(ctx).Error("aws_availability_zone.listAwsAvailabilityZones", "api_error", err)
