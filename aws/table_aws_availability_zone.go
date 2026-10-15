@@ -131,10 +131,11 @@ func listAwsAvailabilityZones(ctx context.Context, d *plugin.QueryData, h *plugi
 	// execute list call
 	resp, err := svc.DescribeAvailabilityZones(ctx, input)
 	if err != nil {
-		// Due to parent hydrate usage, the default ignore error codes configured in connection config are not respected, so we need to handle it here
-		// With the per-call checks (an in-process host with an ignored-error
-		// hook), a hidden error would read as an empty region: return it, so the
-		// scan fails and the host classifies it (a denial is "denied").
+		// The Steampipe path ignores the connection's ignore codes here. With the
+		// per-call checks (an in-process host with an ignored-error hook), return
+		// the error instead: the list's own check then ignores it and reports it
+		// ("list", ec2:DescribeAvailabilityZones), so the host sees a denial,
+		// not an empty region.
 		if !builtWithHook.Load() && shouldIgnoreErrorPluginDefault()(ctx, d, h, err) {
 			return nil, nil
 		}
