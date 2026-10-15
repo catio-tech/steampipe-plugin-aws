@@ -370,6 +370,12 @@ func getAwsKmsKeyRotationStatus(ctx context.Context, d *plugin.QueryData, h *plu
 		// For AWS managed KMS keys GetKeyRotationStatus API generates exceptions
 		var ae smithy.APIError
 		if errors.As(err, &ae) {
+			// With an ignored-error hook (an in-process host), a denial is an
+			// error: the connection's ignore config decides, and the hook reports
+			// the denied column. Without one, it reads as rotation off, as before.
+			if ae.ErrorCode() == "AccessDeniedException" && getIgnoredErrorHook() != nil {
+				return nil, err
+			}
 			if slices.Contains([]string{"AccessDeniedException", "UnsupportedOperationException"}, ae.ErrorCode()) {
 				return &kms.GetKeyRotationStatusOutput{}, nil
 			}

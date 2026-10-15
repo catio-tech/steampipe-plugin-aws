@@ -922,6 +922,11 @@ func Plugin(ctx context.Context) *plugin.Plugin {
 		},
 	}
 
+	// A host that runs the plugin in-process and set SetIgnoredErrorHook learns
+	// which call each ignored error came from. Without a hook, nothing changes.
+	if getIgnoredErrorHook() != nil {
+		reportIgnoredErrors(p)
+	}
 	return p
 }
 
