@@ -58,7 +58,8 @@ const (
 	// AWSCallCanceled: the caller's context ended.
 	AWSCallCanceled = "canceled"
 	// AWSCallNoResponse: no answer from AWS: a network or DNS error, a
-	// timeout, or a request that could not be signed or sent.
+	// timeout, a request that could not be signed or sent, or a panic below
+	// the call middleware.
 	AWSCallNoResponse = "no_response"
 )
 
@@ -73,7 +74,7 @@ const (
 	// the call's context.
 	LimiterWaitEnded
 	// AttemptSent: the attempt goes on to be signed and sent. AttemptEnded
-	// always follows.
+	// always follows, also after a panic.
 	AttemptSent
 	// AttemptEnded: the attempt has its answer or its error.
 	AttemptEnded
@@ -90,7 +91,8 @@ type AWSCallHook interface {
 	// that a scan still makes progress: an attempt that waits for the adaptive
 	// limiter is waiting, not stuck.
 	Attempt(ctx context.Context, e AttemptEvent)
-	// CallEnded is called once per call, after its last attempt.
+	// CallEnded is called once per call, after its last attempt (also after
+	// a panic below the call middleware, as AWSCallNoResponse).
 	CallEnded(ctx context.Context, c AWSCall)
 }
 
@@ -204,12 +206,27 @@ func (m *awsCallMiddleware) HandleInitialize(ctx context.Context, in middleware.
 	out middleware.InitializeOutput, metadata middleware.Metadata, err error,
 ) {
 	st := &callState{}
+	// A panic below (a middleware, the transport) still reports the call, as
+	// no_response. The deferred function does not recover, so the panic goes
+	// on with its own stack.
+	ended := false
+	defer func() {
+		if !ended {
+			m.report(ctx, st, AWSCallNoResponse, "")
+		}
+	}()
 	out, metadata, err = next.HandleInitialize(context.WithValue(ctx, callStateKey{}, st), in)
+	ended = true
+	outcome, code := callOutcome(ctx, err)
+	m.report(ctx, st, outcome, code)
+	return out, metadata, err
+}
+
+func (m *awsCallMiddleware) report(ctx context.Context, st *callState, outcome, code string) {
 	h := getAWSCallHook()
 	if h == nil {
-		return out, metadata, err
+		return
 	}
-	outcome, code := callOutcome(ctx, err)
 	call := AWSCall{
 		Connection:  m.connection,
 		Service:     awsmiddleware.GetServiceID(ctx),
@@ -222,7 +239,6 @@ func (m *awsCallMiddleware) HandleInitialize(ctx context.Context, in middleware.
 		LimiterWait: st.waited,
 	}
 	safeHook(func() { h.CallEnded(ctx, call) })
-	return out, metadata, err
 }
 
 // awsAttemptMiddleware runs once per attempt: it waits for the adaptive
@@ -243,11 +259,7 @@ func (m *awsAttemptMiddleware) HandleFinalize(ctx context.Context, in middleware
 	h := getAWSCallHook()
 	var release func(error) error
 	if l := adaptiveLimiter(m.connection, awsmiddleware.GetServiceID(ctx), callRegion(ctx, m.region)); l != nil {
-		attemptEvent(h, ctx, LimiterWaitStarted)
-		start := time.Now()
-		r, werr := l.GetAttemptToken(ctx)
-		st.waited += time.Since(start)
-		attemptEvent(h, ctx, LimiterWaitEnded)
+		r, werr := m.wait(ctx, h, st, l)
 		if werr != nil {
 			// Only the end of the call's context stops the wait. A canceled
 			// request is not retried.
@@ -257,6 +269,9 @@ func (m *awsAttemptMiddleware) HandleFinalize(ctx context.Context, in middleware
 	}
 	st.attempts++
 	attemptEvent(h, ctx, AttemptSent)
+	// Deferred, so that AttemptEnded also follows a panic below (with no
+	// recover: the panic goes on with its own stack).
+	defer attemptEvent(h, ctx, AttemptEnded)
 	out, metadata, err = next.HandleFinalize(ctx, in)
 	if release != nil {
 		_ = release(err)
@@ -264,8 +279,17 @@ func (m *awsAttemptMiddleware) HandleFinalize(ctx context.Context, in middleware
 	if err != nil && awsThrottles.IsErrorThrottle(err).Bool() {
 		st.throttles++
 	}
-	attemptEvent(h, ctx, AttemptEnded)
 	return out, metadata, err
+}
+
+// wait waits for the adaptive limiter's attempt token. LimiterWaitEnded always
+// follows LimiterWaitStarted.
+func (m *awsAttemptMiddleware) wait(ctx context.Context, h AWSCallHook, st *callState, l *retry.AdaptiveMode) (func(error) error, error) {
+	attemptEvent(h, ctx, LimiterWaitStarted)
+	defer attemptEvent(h, ctx, LimiterWaitEnded)
+	start := time.Now()
+	defer func() { st.waited += time.Since(start) }()
+	return l.GetAttemptToken(ctx)
 }
 
 // callRegion is the region in the call's metadata (an operation option can

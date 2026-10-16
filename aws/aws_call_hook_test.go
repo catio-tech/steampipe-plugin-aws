@@ -30,6 +30,10 @@ type recordingHook struct {
 	// The value of ctxMark on the contexts of the reports.
 	marks []string
 	panic bool
+	// onAttempt, when set, is called with each attempt event and the number
+	// of events so far of that kind.
+	onAttempt func(e AttemptEvent, n int)
+	seen      map[AttemptEvent]int
 }
 
 type ctxMark struct{}
@@ -39,7 +43,15 @@ func (h *recordingHook) Attempt(ctx context.Context, e AttemptEvent) {
 	h.events = append(h.events, e)
 	mark, _ := ctx.Value(ctxMark{}).(string)
 	h.marks = append(h.marks, mark)
+	if h.seen == nil {
+		h.seen = map[AttemptEvent]int{}
+	}
+	h.seen[e]++
+	n, on := h.seen[e], h.onAttempt
 	h.mu.Unlock()
+	if on != nil {
+		on(e, n)
+	}
 	if h.panic {
 		panic("made-up hook panic")
 	}
@@ -248,17 +260,22 @@ func TestAdaptiveLimiterWaitsAfterAThrottle(t *testing.T) {
 // repeated.
 func TestAdaptiveLimiterWaitEndsWithTheContext(t *testing.T) {
 	hookTestEnv(t)
-	hook := &recordingHook{}
+	ctx, d := queryData(t, keyConnection("limited"))
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	// The first attempt is throttled; the repeat must wait for the limiter
+	// (its bucket is empty after the throttle). The context ends as that wait
+	// starts.
+	hook := &recordingHook{onAttempt: func(e AttemptEvent, n int) {
+		if e == LimiterWaitStarted && n == 2 {
+			cancel()
+		}
+	}}
 	setCallHook(t, hook, true)
 	s := &scriptServer{script: []string{"throttle", "ok"}}
 	srv := httptest.NewServer(s)
 	defer srv.Close()
 
-	ctx, d := queryData(t, keyConnection("limited"))
-	// The first call is throttled once; its repeat waits for the limiter (about
-	// 1 to 2 s), longer than the context lasts.
-	ctx, cancel := context.WithTimeout(ctx, 300*time.Millisecond)
-	defer cancel()
 	err := stsCallIn(ctx, t, d, "us-east-1", srv.URL)
 	var canceled *aws.RequestCanceledError
 	if !errors.As(err, &canceled) {
@@ -271,8 +288,9 @@ func TestAdaptiveLimiterWaitEndsWithTheContext(t *testing.T) {
 	if n := s.requests(); n != 1 {
 		t.Errorf("requests = %d, want 1", n)
 	}
-	if events[len(events)-1] != LimiterWaitEnded {
-		t.Errorf("events = %v, want the last wait ended", events)
+	want := []AttemptEvent{LimiterWaitStarted, LimiterWaitEnded, AttemptSent, AttemptEnded, LimiterWaitStarted, LimiterWaitEnded}
+	if !slices.Equal(events, want) {
+		t.Errorf("events = %v, want %v", events, want)
 	}
 }
 
@@ -283,8 +301,8 @@ func TestNoHookNoLimiterLeavesTheClients(t *testing.T) {
 	SetAWSCallHook(nil)
 	SetAdaptiveLimiter(false)
 	opts := []func(*middleware.Stack) error{func(*middleware.Stack) error { return nil }}
-	if got := withAWSCallMiddleware(opts, "plain", "us-east-1"); len(got) != 1 {
-		t.Fatalf("options = %d, want 1 (unchanged)", len(got))
+	if got := withAWSCallMiddleware(opts, "plain", "us-east-1"); len(got) != 1 || &got[0] != &opts[0] {
+		t.Fatalf("options = %d, want the same slice", len(got))
 	}
 
 	plain := stackLists(t, false)
@@ -390,7 +408,7 @@ func TestAWSCallHookWithTheCredentialsHook(t *testing.T) {
 	}
 	calls, _, _ := hook.got()
 	want := AWSCall{Connection: "hooked", Service: "Cost Explorer", Operation: "GetCostAndUsage", Region: "us-east-1", Outcome: AWSCallOK, Attempts: 2}
-	if len(calls) != 1 || calls[0].LimiterWait < 0 {
+	if len(calls) != 1 {
 		t.Fatalf("calls = %+v, want 1", calls)
 	}
 	got := calls[0]
@@ -558,5 +576,49 @@ func TestSetAdaptiveLimiter(t *testing.T) {
 	SetAdaptiveLimiter(false)
 	if adaptiveLimiter("c", "EC2", "us-east-1") != nil {
 		t.Error("a limiter with the limiter off")
+	}
+}
+
+// panicMiddleware panics in Finalize, as a broken transport could.
+type panicMiddleware struct{}
+
+func (panicMiddleware) ID() string { return "TestPanic" }
+
+func (panicMiddleware) HandleFinalize(context.Context, middleware.FinalizeInput, middleware.FinalizeHandler) (middleware.FinalizeOutput, middleware.Metadata, error) {
+	panic("made-up transport panic")
+}
+
+// A panic below the middlewares still ends the attempt and the call for the
+// hook, and goes on to the caller unchanged.
+func TestAWSCallHookPanicBelow(t *testing.T) {
+	hookTestEnv(t)
+	hook := &recordingHook{}
+	setCallHook(t, hook, true)
+	ctx, d := queryData(t, keyConnection("panics"))
+	cfg, err := getClientWithMaxRetries(ctx, d, "us-east-1", 4, 5*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := sts.NewFromConfig(*cfg, func(o *sts.Options) {
+		o.BaseEndpoint = aws.String("http://127.0.0.1:1")
+		o.APIOptions = append(o.APIOptions, func(s *middleware.Stack) error {
+			return s.Finalize.Add(panicMiddleware{}, middleware.After)
+		})
+	})
+	got := func() (p any) {
+		defer func() { p = recover() }()
+		_, _ = client.GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
+		return nil
+	}()
+	if got != "made-up transport panic" {
+		t.Fatalf("recovered %v, want the transport's panic", got)
+	}
+	calls, events, _ := hook.got()
+	want := []AttemptEvent{LimiterWaitStarted, LimiterWaitEnded, AttemptSent, AttemptEnded}
+	if !slices.Equal(events, want) {
+		t.Errorf("events = %v, want %v", events, want)
+	}
+	if len(calls) != 1 || calls[0].Outcome != AWSCallNoResponse || calls[0].Attempts != 1 {
+		t.Errorf("calls = %+v, want one no_response call with 1 attempt", calls)
 	}
 }
