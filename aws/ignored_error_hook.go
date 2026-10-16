@@ -281,8 +281,32 @@ func ignoredError(d *plugin.QueryData, call string, columns []string, action str
 	if errors.As(err, &ae) {
 		e.Code = ae.ErrorCode()
 	}
+	var pe *permissionError
+	if errors.As(err, &pe) && pe.action != "" {
+		e.Action = pe.action
+	}
 	return e
 }
+
+// permissionError is a denial that table code found behind another error code:
+// a ForbiddenException, or a ValidationException that says the caller cannot
+// use a KMS key. With the per-call ignore checks (builtWithHook), table code
+// returns it in place of hiding the error: it reads as AccessDeniedException,
+// so the connection's permission codes decide, and the hook reports it, with
+// action in place of the call's tags when action is set. Without the checks,
+// table code keeps its old behaviour and never returns it.
+type permissionError struct {
+	err    error
+	action string
+}
+
+func deniedAs(err error, action string) error { return &permissionError{err: err, action: action} }
+
+func (e *permissionError) Error() string                 { return "AccessDeniedException: " + e.err.Error() }
+func (e *permissionError) Unwrap() error                 { return e.err }
+func (e *permissionError) ErrorCode() string             { return "AccessDeniedException" }
+func (e *permissionError) ErrorMessage() string          { return e.err.Error() }
+func (e *permissionError) ErrorFault() smithy.ErrorFault { return smithy.FaultClient }
 
 // tagAction is the IAM action that a call's rate-limiter tags name, for example
 // {"service": "kms", "action": "DescribeKey"} → "kms:DescribeKey".

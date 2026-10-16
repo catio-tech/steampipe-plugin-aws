@@ -265,11 +265,8 @@ func getServerlessApplicationRepositoryApplicationPolicy(ctx context.Context, d 
 	// Get call
 	data, err := svc.GetApplicationPolicy(ctx, params)
 	if err != nil {
-		var ae smithy.APIError
-		if errors.As(err, &ae) {
-			if ae.ErrorCode() == "ForbiddenException" {
-				return nil, nil
-			}
+		if out, mapped, ok := serverlessrepoPolicyError(err, builtWithHook.Load()); ok {
+			return out, mapped
 		}
 		plugin.Logger(ctx).Error("aws_serverlessapplicationrepository_application.getServerlessApplicationRepositoryApplicationPolicy", "api_error", err)
 		return nil, err
@@ -286,4 +283,20 @@ func serverlessApplicationRepositoryArn(item interface{}) *string {
 		return item.ApplicationId
 	}
 	return nil
+}
+
+// serverlessrepoPolicyError maps GetApplicationPolicy's ForbiddenException,
+// which it answers when the role may not read the policy (ok: the caller
+// returns out, err). Without the per-call checks (the Steampipe path) it reads
+// as no policy, as before. With them (withHook), it is a denial that the hook
+// reports (the statements column), not a silent NULL.
+func serverlessrepoPolicyError(err error, withHook bool) (out interface{}, mapped error, ok bool) {
+	var ae smithy.APIError
+	if !errors.As(err, &ae) || ae.ErrorCode() != "ForbiddenException" {
+		return nil, nil, false
+	}
+	if withHook {
+		return nil, deniedAs(err, ""), true
+	}
+	return nil, nil, true
 }

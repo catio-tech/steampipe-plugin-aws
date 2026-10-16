@@ -239,6 +239,12 @@ func getAwsSchedulerSchedule(ctx context.Context, d *plugin.QueryData, h *plugin
 	// Call API
 	result, err := svc.GetSchedule(ctx, params)
 	if err != nil {
+		// With the per-call checks, the ValidationException for a KMS key that the
+		// caller cannot use is a denial of kms:Decrypt that the hook reports (the
+		// detail columns), not a silent NULL.
+		if mapped := scheduleGetError(err, builtWithHook.Load()); mapped != err {
+			return nil, mapped
+		}
 		plugin.Logger(ctx).Error("aws_scheduler_schedule.getAwsSchedulerSchedule", "api_error", err)
 		return nil, err
 	}
@@ -253,10 +259,27 @@ func getAwsSchedulerSchedule(ctx context.Context, d *plugin.QueryData, h *plugin
 func ignoreScheduleDetailErrors() plugin.ErrorPredicateWithContext {
 	notFound := shouldIgnoreErrors([]string{"ResourceNotFoundException"})
 	return func(ctx context.Context, d *plugin.QueryData, h *plugin.HydrateData, err error) bool {
-		var ae smithy.APIError
-		if errors.As(err, &ae) && ae.ErrorCode() == "ValidationException" && strings.Contains(ae.ErrorMessage(), "KMS key") {
+		if isScheduleKMSDenial(err) {
 			return true
 		}
 		return notFound(ctx, d, h, err)
 	}
+}
+
+// isScheduleKMSDenial: GetSchedule's ValidationException when the caller cannot
+// use the schedule's customer managed KMS key.
+func isScheduleKMSDenial(err error) bool {
+	var ae smithy.APIError
+	return errors.As(err, &ae) && ae.ErrorCode() == "ValidationException" && strings.Contains(ae.ErrorMessage(), "KMS key")
+}
+
+// scheduleGetError maps GetSchedule's error: with the per-call checks
+// (withHook), the KMS-key ValidationException is a denial of kms:Decrypt that
+// the hook reports; every other error, and every error without the checks, is
+// returned as it is (ignoreScheduleDetailErrors then decides, as before).
+func scheduleGetError(err error, withHook bool) error {
+	if withHook && isScheduleKMSDenial(err) {
+		return deniedAs(err, "kms:Decrypt")
+	}
+	return err
 }
