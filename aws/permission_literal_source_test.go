@@ -15,18 +15,37 @@ import (
 // error code or message: code that can turn a denial into "no data" outside the
 // connection's per-call ignore check, where the ignored-error hook would not see
 // it.
-var permissionLiteral = regexp.MustCompile(`"(AccessDenied|AccessDeniedException|ForbiddenException|UnauthorizedOperation|UnauthorizedException|AuthorizationError)"|(?i)insufficient privileges|not authorized`)
+var permissionLiteral = regexp.MustCompile(`"(AccessDenied|AccessDeniedException|Forbidden|ForbiddenException|UnauthorizedOperation|UnauthorizedException|AuthorizationError|AuthFailure|OptInRequired)"|(?i)insufficient privileges|not authorized|does not have access`)
 
-// permissionLiteralReviewed lists the table files that may name one, with the
-// reason. A new file fails the test: review it (return the error, or deniedAs
-// with builtWithHook, so the hook reports the denial), then list it here.
-var permissionLiteralReviewed = map[string]string{
-	"table_aws_kms_key.go": "kmsKeyRotationStatusError: hides the denial only without the hook",
-	"table_aws_serverlessapplicationrepository_application.go": "serverlessrepoPolicyError: deniedAs with the hook",
-	"table_aws_backup_vault.go":                                "a get IgnoreConfig code: the per-call check reports it",
-	"table_aws_bedrock_imported_model.go":                      `"not authorized to invoke this API operation" is the region-not-supported answer`,
-	"table_aws_backup_framework.go":                            `"Insufficient privileges" swallowed: not in the catalog (Task #825 follow-up)`,
-	"table_aws_backup_report_plan.go":                          `"Insufficient privileges" swallowed: not in the catalog (Task #825 follow-up)`,
+// permissionLiteralReviewed lists, per table file, the literals that it may
+// name (exactly, as in the source), with the reason. A new literal, also in a
+// listed file, fails the test: review it (return the error, or deniedAs with
+// builtWithHook, so the hook reports the denial), then list it here.
+var permissionLiteralReviewed = map[string]map[string]string{
+	"table_aws_kms_key.go": {
+		`"AccessDeniedException"`: "kmsKeyRotationStatusError: hides the denial only without the hook",
+	},
+	"table_aws_serverlessapplicationrepository_application.go": {
+		`"ForbiddenException"`: "serverlessrepoPolicyError: deniedAs with the hook",
+	},
+	"table_aws_backup_vault.go": {
+		`"AccessDeniedException"`: "a get IgnoreConfig code: the per-call check reports it",
+	},
+	"table_aws_bedrock_imported_model.go": {
+		`"Your account is not authorized to invoke this API operation"`: "the region-not-supported answer",
+	},
+	"table_aws_ec2_regional_settings.go": {
+		`"AuthFailure"`: "returns the defaults on AuthFailure: not in the catalog (Task #825 follow-up)",
+	},
+	"table_aws_inspector2_organization_configuration.go": {
+		`"Invoking account does not have access to describe the organization configuration"`: "not a delegated admin: not in the catalog (Task #825 follow-up)",
+	},
+	"table_aws_backup_framework.go": {
+		`"Insufficient privileges to perform this action"`: "swallowed: not in the catalog (Task #825 follow-up)",
+	},
+	"table_aws_backup_report_plan.go": {
+		`"Insufficient privileges to perform this action"`: "swallowed: not in the catalog (Task #825 follow-up)",
+	},
 }
 
 func TestPermissionLiteralsAreReviewed(t *testing.T) {
@@ -64,8 +83,8 @@ func TestPermissionLiteralsAreReviewed(t *testing.T) {
 					}
 				}
 			}
-			found[f] = true
-			if _, ok := permissionLiteralReviewed[f]; !ok {
+			found[f+" "+lit.Value] = true
+			if _, ok := permissionLiteralReviewed[f][lit.Value]; !ok {
 				t.Errorf("%s names a permission error outside the per-call check; review it for the ignored-error hook: %s",
 					fset.Position(lit.Pos()), lit.Value)
 			}
@@ -73,9 +92,11 @@ func TestPermissionLiteralsAreReviewed(t *testing.T) {
 		})
 	}
 	var stale []string
-	for f := range permissionLiteralReviewed {
-		if !found[f] {
-			stale = append(stale, f)
+	for f, lits := range permissionLiteralReviewed {
+		for lit := range lits {
+			if !found[f+" "+lit] {
+				stale = append(stale, f+" "+lit)
+			}
 		}
 	}
 	sort.Strings(stale)
