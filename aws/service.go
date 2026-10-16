@@ -2097,6 +2097,11 @@ func getClientWithMaxRetries(ctx context.Context, d *plugin.QueryData, region st
 		}
 	}
 
+	// With an AWS call hook or the adaptive limiter (aws_call_hook.go), the
+	// client reports its calls and waits for the limiter. Without both, the
+	// options stay as they are.
+	cfg.APIOptions = withAWSCallMiddleware(cfg.APIOptions, d.Connection.Name, region)
+
 	plugin.Logger(ctx).Debug("getClientWithMaxRetries", "connection_name", d.Connection.Name, "region", region, "status", "done")
 
 	return &cfg, err
