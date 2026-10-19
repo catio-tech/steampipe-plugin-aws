@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 # ---------------------------------------------------
 # Stage 1: Build your custom AWS plugin
 # ---------------------------------------------------
@@ -65,6 +66,23 @@ RUN steampipe plugin install datadog
 # k8s connections alongside aws (Spec #102, Phase 1).
 RUN steampipe plugin install kubernetes
 
+# Private Catio plugins from GHCR (Task #740+).
+#
+# Auth is prepared in CI as a Docker config.json and passed as BuildKit secret
+# `docker_config` (never written into an image layer). Mount it for any
+# `steampipe plugin install ghcr.io/catio-tech/...` line:
+#
+#   RUN --mount=type=secret,id=docker_config,target=/tmp/ghcr-docker/config.json,mode=0444 \
+#       DOCKER_CONFIG=/tmp/ghcr-docker \
+#       steampipe plugin install ghcr.io/catio-tech/<plugin>@<version> --skip-config
+#
+# Requires packages:read on GITHUB_TOKEN and a one-time package Actions-access
+# grant to this repo. Bump the version pin when promoting a new release.
+ARG DEVICE42_PLUGIN_VERSION=0.1.0
+RUN --mount=type=secret,id=docker_config,target=/tmp/ghcr-docker/config.json,mode=0444 \
+    DOCKER_CONFIG=/tmp/ghcr-docker \
+    steampipe plugin install "ghcr.io/catio-tech/device42@${DEVICE42_PLUGIN_VERSION}" --skip-config
+
 # Define plugin installation path
 ENV PLUGIN_DIR=/home/steampipe/.steampipe/plugins/hub.steampipe.io/plugins/turbot/aws@latest
 
@@ -81,13 +99,11 @@ RUN sudo chmod +x $PLUGIN_DIR/aws.plugin
 
 # Register the custom-built AWS plugin in versions.json.
 #
-# The csv/datadog/kubernetes installs above each wrote their own entry into
-# versions.json. The custom AWS plugin is COPY'd in (not installed via
+# The csv/datadog/kubernetes/device42 installs above each wrote their own entry
+# into versions.json. The custom AWS plugin is COPY'd in (not installed via
 # `steampipe plugin install`), so it has no entry yet. We MERGE the aws@latest
 # entry into the existing file with jq instead of overwriting it — a bare
-# `echo {aws-only} > versions.json` would clobber the installed-plugin entries,
-# leaving csv/datadog/kubernetes binaries on disk but unregistered (and thus
-# never loaded by Steampipe).
+# overwrite would clobber the installed-plugin entries.
 RUN jq '.plugins["hub.steampipe.io/plugins/turbot/aws@latest"] = {"name": "aws", "version": "0.1.0", "struct_version": 20230502}' \
       /home/steampipe/.steampipe/plugins/versions.json > /tmp/versions.json && \
     mv /tmp/versions.json /home/steampipe/.steampipe/plugins/versions.json

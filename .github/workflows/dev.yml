@@ -11,6 +11,7 @@ env:
 permissions:
   id-token: write
   contents: read
+  packages: read
 
 jobs:
   build-and-publish:
@@ -31,6 +32,16 @@ jobs:
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
 
+      # Docker config for private ghcr.io/catio-tech/* Steampipe plugins.
+      # Mounted as BuildKit secret `docker_config` — not baked into the image.
+      - name: Prepare GHCR docker config
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          test -n "$GHCR_TOKEN"
+          AUTH="$(printf 'x-access-token:%s' "$GHCR_TOKEN" | base64 -w0)"
+          printf '{"auths":{"ghcr.io":{"auth":"%s"}}}\n' "$AUTH" > "$RUNNER_TEMP/ghcr-docker-config.json"
+
       - name: Build and push steampipe image
         uses: docker/build-push-action@v6
         with:
@@ -39,3 +50,5 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.us-west-2.amazonaws.com/steampipe:${{ env.GIT_COMMIT_SHA }}
+          secret-files: |
+            docker_config=${{ runner.temp }}/ghcr-docker-config.json
