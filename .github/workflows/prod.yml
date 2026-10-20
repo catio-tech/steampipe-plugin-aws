@@ -5,6 +5,7 @@ on: workflow_dispatch
 env:
   AWS_REGION: "us-west-2"
   AWS_ACCOUNT_ID: "090135924592"
+  DEVICE42_GHCR_REF: "ghcr.io/catio-tech/device42:latest"
 
 permissions:
   id-token: write
@@ -32,6 +33,8 @@ jobs:
 
       # Docker config for private ghcr.io/catio-tech/* Steampipe plugins.
       # Mounted as BuildKit secret `docker_config` — not baked into the image.
+      # Do not point DOCKER_CONFIG at this dir for `docker buildx` — that hides
+      # CLI plugins under ~/.docker/cli-plugins.
       - name: Prepare GHCR docker config
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -39,6 +42,30 @@ jobs:
           test -n "$GHCR_TOKEN"
           AUTH="$(printf 'x-access-token:%s' "$GHCR_TOKEN" | base64 -w0)"
           printf '{"auths":{"ghcr.io":{"auth":"%s"}}}\n' "$AUTH" > "$RUNNER_TEMP/ghcr-docker-config.json"
+
+      - name: Resolve Device42 GHCR digest
+        id: device42
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          REPO="${DEVICE42_GHCR_REF#ghcr.io/}"
+          TAG="${REPO##*:}"
+          NAME="${REPO%:*}"
+          PULL_TOKEN="$(curl -fsSL \
+            -u "x-access-token:${GHCR_TOKEN}" \
+            "https://ghcr.io/token?service=ghcr.io&scope=repository:${NAME}:pull" \
+            | jq -r .token)"
+          test -n "$PULL_TOKEN" && test "$PULL_TOKEN" != null
+          DIGEST="$(curl -fsSI \
+            -H "Authorization: Bearer ${PULL_TOKEN}" \
+            -H "Accept: application/vnd.oci.image.index.v1+json,application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.docker.distribution.manifest.v2+json" \
+            "https://ghcr.io/v2/${NAME}/manifests/${TAG}" \
+            | tr -d '\r' \
+            | awk 'tolower($1)=="docker-content-digest:" {print $2; exit}')"
+          test -n "$DIGEST"
+          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
+          echo "Device42 ${DEVICE42_GHCR_REF} → ${DIGEST}"
 
       - name: Build and push steampipe image
         uses: docker/build-push-action@v6
@@ -48,6 +75,7 @@ jobs:
           platforms: linux/amd64
           build-args: |
             PY_PAT=${{ secrets.PY_PAT }}
+            DEVICE42_CACHEBUST=${{ steps.device42.outputs.digest }}
           push: true
           tags: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.us-west-2.amazonaws.com/steampipe:${{ env.GIT_COMMIT_SHA }}
           secret-files: |

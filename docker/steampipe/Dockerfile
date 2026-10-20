@@ -73,15 +73,25 @@ RUN steampipe plugin install kubernetes
 # `steampipe plugin install ghcr.io/catio-tech/...` line:
 #
 #   RUN --mount=type=secret,id=docker_config,target=/tmp/ghcr-docker/config.json,mode=0444 \
-#       DOCKER_CONFIG=/tmp/ghcr-docker \
-#       steampipe plugin install ghcr.io/catio-tech/<plugin>@<version> --skip-config
+#       export DOCKER_CONFIG=/tmp/ghcr-docker && \
+#       steampipe plugin install ghcr.io/catio-tech/<plugin>@latest --skip-config
 #
 # Requires packages:read on GITHUB_TOKEN and a one-time package Actions-access
-# grant to this repo. Bump the version pin when promoting a new release.
-ARG DEVICE42_PLUGIN_VERSION=0.1.0
+# grant to this repo.
+#
+# Always install the Steampipe @latest stream so .spc files can use a stable
+# plugin = "ghcr.io/catio-tech/device42@latest" (CatIOPipe never embeds a
+# semver). DEVICE42_CACHEBUST must change when GHCR's :latest moves — CI sets
+# it to the OCI digest of ghcr.io/catio-tech/device42:latest so a Device42
+# release rebuilds this layer without editing the Dockerfile. Local builds
+# that omit it may reuse a cached plugin binary.
+ARG DEVICE42_CACHEBUST=unspecified
+# export DOCKER_CONFIG so it applies to steampipe (a bare VAR=val before
+# `echo && steampipe` only scopes the env to echo — install would be unauth'd).
 RUN --mount=type=secret,id=docker_config,target=/tmp/ghcr-docker/config.json,mode=0444 \
-    DOCKER_CONFIG=/tmp/ghcr-docker \
-    steampipe plugin install "ghcr.io/catio-tech/device42@${DEVICE42_PLUGIN_VERSION}" --skip-config
+    export DOCKER_CONFIG=/tmp/ghcr-docker && \
+    echo "device42@latest cachebust=${DEVICE42_CACHEBUST}" && \
+    steampipe plugin install "ghcr.io/catio-tech/device42@latest" --skip-config
 
 # Define plugin installation path
 ENV PLUGIN_DIR=/home/steampipe/.steampipe/plugins/hub.steampipe.io/plugins/turbot/aws@latest
