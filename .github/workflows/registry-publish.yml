@@ -1,4 +1,4 @@
-# Build multi-arch plugin binaries and publish a private Steampipe OCI
+# Build the linux/amd64 plugin binary and publish a private Steampipe OCI
 # artifact to GHCR as ghcr.io/catio-tech/aws:<semver>.
 #
 # Trigger: push a tag matching v* (e.g. v1.0.0).
@@ -147,10 +147,7 @@ jobs:
           oras push "$REF" \
             --config config.json:application/vnd.turbot.steampipe.config.v1+json \
             --annotation-file annotations.json \
-            steampipe-plugin-${PLUGIN_NAME}_darwin_amd64.gz:application/vnd.turbot.steampipe.plugin.darwin-amd64.layer.v1+gzip \
-            steampipe-plugin-${PLUGIN_NAME}_darwin_arm64.gz:application/vnd.turbot.steampipe.plugin.darwin-arm64.layer.v1+gzip \
             steampipe-plugin-${PLUGIN_NAME}_linux_amd64.gz:application/vnd.turbot.steampipe.plugin.linux-amd64.layer.v1+gzip \
-            steampipe-plugin-${PLUGIN_NAME}_linux_arm64.gz:application/vnd.turbot.steampipe.plugin.linux-arm64.layer.v1+gzip \
             docs:application/vnd.turbot.steampipe.plugin.docs.layer.v1+tar \
             config:application/vnd.turbot.steampipe.plugin.spc.layer.v1+tar
 
