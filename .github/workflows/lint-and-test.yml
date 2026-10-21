@@ -16,7 +16,8 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          # Not go-version-file: go.mod's 1.26.8 predates the eMudhra CA distrust fix
+          go-version: "1.26.10"
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
