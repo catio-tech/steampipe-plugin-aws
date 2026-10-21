@@ -5,12 +5,13 @@
 # golang:*-bookworm images always pull in perl-base (Essential) and
 # have no slim variant — Hub flags those OS CVEs on the FROM line.
 # Pin by digest; public tags beyond :latest are limited.
-FROM cgr.dev/chainguard/go:latest@sha256:0dfefd80cb9ce8db4be95d20d324c56005f40116524cdc8b8410f46ecd4732cb AS plugin-builder
+FROM cgr.dev/chainguard/go:latest@sha256:79d209c423918068c0cc6061b8452468fad709e1dfdaddbf7be4562aa09bb2c4 AS plugin-builder
 
-# The pinned image ships Go 1.26.5, and Chainguard's public :latest has moved
-# on to Go 1.27, so pin the toolchain instead: go downloads go1.26.8 from the
-# module proxy (verified against GOSUMDB) and builds with it.
-ENV GOTOOLCHAIN=go1.26.8
+# The pinned image ships Go 1.27.3, but the plugin stays on the Go 1.26 line
+# (go.mod, CI), so pin the toolchain instead: go downloads go1.26.10 from the
+# module proxy (verified against GOSUMDB) and builds with it. Its crypto/x509
+# rejects the compromised eMudhra CAs.
+ENV GOTOOLCHAIN=go1.26.10
 
 WORKDIR /workspace
 
@@ -32,6 +33,7 @@ RUN go build -tags "netgo" -o aws.plugin *.go
 FROM ubuntu:22.04
 
 # Install minimal runtime dependencies
+# (fails unless ca-certificates >= 20260816, which drops the compromised eMudhra CAs)
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
       ca-certificates \
@@ -40,6 +42,7 @@ RUN apt-get update && \
       sudo \
       jq \
       gnupg && \
+    dpkg --compare-versions "$(dpkg-query -W -f='${Version}' ca-certificates)" ge 20260816 && \
     rm -rf /var/lib/apt/lists/*
 
 # Create a non-root 'steampipe' user
