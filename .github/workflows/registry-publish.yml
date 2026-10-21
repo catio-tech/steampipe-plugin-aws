@@ -1,0 +1,167 @@
+# Build multi-arch plugin binaries and publish a private Steampipe OCI
+# artifact to GHCR as ghcr.io/catio-tech/aws:<semver>.
+#
+# Trigger: push a tag matching v* (e.g. v1.0.0).
+#
+# After the first publish, grant Read once under the package's
+# "Manage Actions access" to catio-tech/steampipe-bundle (and keep the
+# grant for steampipe-plugin-aws only if the interim image path still
+# pulls this package). Plugin publish does NOT rebuild the Steampipe
+# image — bump the lock in steampipe-bundle instead.
+name: Build and Deploy OCI Image
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  CR: ghcr.io
+  ORG: catio-tech
+  CONFIG_SCHEMA_VERSION: "2020-11-18"
+  ORAS_VERSION: "1.3.0"
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set plugin name
+        run: |
+          # Repo is steampipe-plugin-aws → plugin name aws.
+          # Do not use cut -d'-' -f3 (breaks on hyphenated orgs like catio-tech).
+          name="${GITHUB_REPOSITORY##*/}"
+          name="${name#steampipe-plugin-}"
+          echo "PLUGIN_NAME=${name}" >> "$GITHUB_ENV"
+          echo "Plugin name: ${name}"
+
+      - name: Exit if goreleaser file is missing
+        run: test -f .goreleaser.yml
+
+      - name: Resolve version from tag
+        run: |
+          VERSION="${GITHUB_REF#refs/*/}"
+          VERSION="${VERSION#v}"
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+          if [[ ! $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]]; then
+            echo "Invalid version: $VERSION (expected N.N.N or N.N.N-rc.N)"
+            exit 1
+          fi
+
+      - name: Ensure version does not already exist
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          URL="https://${CR}/v2/${ORG}/${PLUGIN_NAME}/tags/list?n=10000"
+          # Authenticated list — package is private.
+          RESP=$(curl -fsSL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.oci.image.index.v1+json" \
+            "$URL" 2>/dev/null || true)
+          if echo "$RESP" | jq -e 'has("tags")' >/dev/null 2>&1; then
+            if [ "$(echo "$RESP" | jq ".tags | index(\"$VERSION\")")" != "null" ]; then
+              echo "Version already exists: $VERSION"
+              exit 1
+            fi
+          fi
+          echo "OK — version does not exist (or package not created yet): $VERSION"
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --clean --skip=publish
+
+      - name: Stage artifacts for ORAS
+        run: |
+          cp ./dist/*.gz .
+          ls -la *.gz
+          test -d docs
+          test -d config
+
+      - name: Create Steampipe config.json
+        run: |
+          jq -n \
+            --arg name "$PLUGIN_NAME" \
+            --arg organization "$ORG" \
+            --arg version "$VERSION" \
+            --arg schemaVersion "$CONFIG_SCHEMA_VERSION" \
+            '{schemaVersion: $schemaVersion, plugin: { name: $name, organization: $organization, version: $version} }' \
+            > config.json
+          cat config.json
+
+      - name: Create OCI annotations
+        run: |
+          jq -n \
+            --arg title "$PLUGIN_NAME" \
+            --arg desc "$ORG" \
+            --arg version "$VERSION" \
+            --arg timestamp "$(date +%FT%T%z | sed 's/\([0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/')" \
+            --arg repo "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+            --arg commit "$GITHUB_SHA" \
+            --arg vendor "$ORG" \
+            '{
+              "$manifest": {
+                "org.opencontainers.image.title": $title,
+                "org.opencontainers.image.description": $desc,
+                "org.opencontainers.image.version": $version,
+                "org.opencontainers.image.created": $timestamp,
+                "org.opencontainers.image.source": $repo,
+                "org.opencontainers.image.revision": $commit,
+                "org.opencontainers.image.vendor": $vendor
+              }
+            }' > annotations.json
+          cat annotations.json
+
+      - name: Install ORAS
+        run: |
+          curl -fsSL -o oras.tgz \
+            "https://github.com/oras-project/oras/releases/download/v${ORAS_VERSION}/oras_${ORAS_VERSION}_linux_amd64.tar.gz"
+          sudo tar xzf oras.tgz -C /usr/local/bin oras
+          oras version
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.CR }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push Steampipe OCI plugin to GHCR
+        run: |
+          REF="${CR}/${ORG}/${PLUGIN_NAME}:${VERSION}"
+          LATEST_REF="${CR}/${ORG}/${PLUGIN_NAME}:latest"
+          oras push "$REF" \
+            --config config.json:application/vnd.turbot.steampipe.config.v1+json \
+            --annotation-file annotations.json \
+            steampipe-plugin-${PLUGIN_NAME}_darwin_amd64.gz:application/vnd.turbot.steampipe.plugin.darwin-amd64.layer.v1+gzip \
+            steampipe-plugin-${PLUGIN_NAME}_darwin_arm64.gz:application/vnd.turbot.steampipe.plugin.darwin-arm64.layer.v1+gzip \
+            steampipe-plugin-${PLUGIN_NAME}_linux_amd64.gz:application/vnd.turbot.steampipe.plugin.linux-amd64.layer.v1+gzip \
+            steampipe-plugin-${PLUGIN_NAME}_linux_arm64.gz:application/vnd.turbot.steampipe.plugin.linux-arm64.layer.v1+gzip \
+            docs:application/vnd.turbot.steampipe.plugin.docs.layer.v1+tar \
+            config:application/vnd.turbot.steampipe.plugin.spc.layer.v1+tar
+
+          oras tag "$REF" "$GITHUB_RUN_ID"
+
+          # Tag latest only for non-rc releases.
+          if [[ $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Tagging as latest: $LATEST_REF"
+            oras tag "$REF" "$LATEST_REF"
+          else
+            echo "Skipping latest tag for rc version: $VERSION"
+          fi
+
+          echo "Published ${REF}"

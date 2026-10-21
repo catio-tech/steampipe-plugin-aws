@@ -1,37 +1,45 @@
-# This is an example goreleaser.yaml file with some sane defaults.
-# Make sure to check the documentation at http://goreleaser.com
+# GoReleaser config for Steampipe OCI packaging (GHCR).
+# Binaries are published as gzip layers by .github/workflows/registry-publish.yml.
+version: 2
+
 before:
   hooks:
     - go mod tidy
+
 builds:
-  - env:
+  - id: steampipe
+    env:
       - CGO_ENABLED=0
       - GO111MODULE=on
       - GOPRIVATE=github.com/turbot
     goos:
       - linux
       - darwin
-
     goarch:
       - amd64
       - arm64
-
-    id: "steampipe"
     binary: "{{ .ProjectName }}.plugin"
     flags:
       - -tags=netgo
 
 archives:
-  - format: gz
+  - formats: [gz]
     name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
     files:
       - none*
+
 checksum:
   name_template: "{{ .ProjectName }}_{{ .Version }}_SHA256SUMS"
   algorithm: sha256
+
 changelog:
   sort: asc
   filters:
     exclude:
       - "^docs:"
       - "^test:"
+
+release:
+  disable: true
+
+project_name: steampipe-plugin-aws
