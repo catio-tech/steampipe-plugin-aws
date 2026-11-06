@@ -55,36 +55,44 @@ func tableAwsEc2Instance(_ context.Context) *plugin.Table {
 		},
 		HydrateConfig: []plugin.HydrateConfig{
 			{
-				Func: getInstanceDisableAPITerminationData,
-				Tags: map[string]string{"service": "ec2", "action": "DescribeInstanceAttribute"},
+				Func:         getInstanceDisableAPITerminationData,
+				Tags:         map[string]string{"service": "ec2", "action": "DescribeInstanceAttribute"},
+				IgnoreConfig: instanceGoneIgnoreConfig(),
 			},
 			{
-				Func: getInstanceInitiatedShutdownBehavior,
-				Tags: map[string]string{"service": "ec2", "action": "DescribeInstanceAttribute"},
+				Func:         getInstanceInitiatedShutdownBehavior,
+				Tags:         map[string]string{"service": "ec2", "action": "DescribeInstanceAttribute"},
+				IgnoreConfig: instanceGoneIgnoreConfig(),
 			},
 			{
-				Func: getInstanceKernelID,
-				Tags: map[string]string{"service": "ec2", "action": "DescribeInstanceAttribute"},
+				Func:         getInstanceKernelID,
+				Tags:         map[string]string{"service": "ec2", "action": "DescribeInstanceAttribute"},
+				IgnoreConfig: instanceGoneIgnoreConfig(),
 			},
 			{
-				Func: getInstanceRAMDiskID,
-				Tags: map[string]string{"service": "ec2", "action": "DescribeInstanceAttribute"},
+				Func:         getInstanceRAMDiskID,
+				Tags:         map[string]string{"service": "ec2", "action": "DescribeInstanceAttribute"},
+				IgnoreConfig: instanceGoneIgnoreConfig(),
 			},
 			{
-				Func: getInstanceSriovNetSupport,
-				Tags: map[string]string{"service": "ec2", "action": "DescribeInstanceAttribute"},
+				Func:         getInstanceSriovNetSupport,
+				Tags:         map[string]string{"service": "ec2", "action": "DescribeInstanceAttribute"},
+				IgnoreConfig: instanceGoneIgnoreConfig(),
 			},
 			{
-				Func: getInstanceUserData,
-				Tags: map[string]string{"service": "ec2", "action": "DescribeInstanceAttribute"},
+				Func:         getInstanceUserData,
+				Tags:         map[string]string{"service": "ec2", "action": "DescribeInstanceAttribute"},
+				IgnoreConfig: instanceGoneIgnoreConfig(),
 			},
 			{
-				Func: getEc2LaunchTemplateData,
-				Tags: map[string]string{"service": "ec2", "action": "GetLaunchTemplateData"},
+				Func:         getEc2LaunchTemplateData,
+				Tags:         map[string]string{"service": "ec2", "action": "GetLaunchTemplateData"},
+				IgnoreConfig: instanceGoneIgnoreConfig(),
 			},
 			{
-				Func: getInstanceStatus,
-				Tags: map[string]string{"service": "ec2", "action": "DescribeInstanceStatus"},
+				Func:         getInstanceStatus,
+				Tags:         map[string]string{"service": "ec2", "action": "DescribeInstanceStatus"},
+				IgnoreConfig: instanceGoneIgnoreConfig(),
 			},
 		},
 		GetMatrixItemFunc: SupportedRegionMatrix(AWS_EC2_SERVICE_ID),
@@ -518,6 +526,24 @@ func tableAwsEc2Instance(_ context.Context) *plugin.Table {
 				Transform:   transform.FromValue().Transform(transform.EnsureStringArray),
 			},
 		}),
+	}
+}
+
+// instanceGoneIgnoreConfig is the ignore config of each detail call that names
+// the instance (DescribeInstanceAttribute, GetLaunchTemplateData,
+// DescribeInstanceStatus). An instance can end between the list call and its
+// detail calls (an Auto Scaling group that scales in during the scan): AWS
+// then answers InvalidInstanceID.NotFound, which would fail the whole region's
+// scan. The row stays, with the call's columns empty. The connection's
+// ignore_error_codes and ignore_error_messages still apply, as with the
+// plugin's default config.
+func instanceGoneIgnoreConfig() *plugin.IgnoreConfig {
+	gone := shouldIgnoreErrors([]string{"InvalidInstanceID.NotFound"})
+	connection := shouldIgnoreErrorPluginDefault()
+	return &plugin.IgnoreConfig{
+		ShouldIgnoreErrorFunc: func(ctx context.Context, d *plugin.QueryData, h *plugin.HydrateData, err error) bool {
+			return gone(ctx, d, h, err) || connection(ctx, d, h, err)
+		},
 	}
 }
 
