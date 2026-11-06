@@ -121,8 +121,21 @@ func tableAwsTransferUser(_ context.Context) *plugin.Table {
 }
 
 // // HYDRATE FUNCTIONS
+// serverHasUsers: the server can have Transfer Family users. AWS creates users
+// only on a server whose identity provider is SERVICE_MANAGED (CreateUser);
+// ListUsers on another server (AWS_DIRECTORY_SERVICE, API_GATEWAY,
+// AWS_LAMBDA) answers InvalidRequestException, which failed the scan of the
+// whole region. A server with no identity provider type is listed as before.
+func serverHasUsers(s types.ListedServer) bool {
+	return s.IdentityProviderType == "" || s.IdentityProviderType == types.IdentityProviderTypeServiceManaged
+}
+
 func listTransferUsers(ctx context.Context, d *plugin.QueryData, h *plugin.HydrateData) (interface{}, error) {
-	id := h.Item.(types.ListedServer).ServerId
+	server := h.Item.(types.ListedServer)
+	if !serverHasUsers(server) {
+		return nil, nil
+	}
+	id := server.ServerId
 
 	// Create session
 	svc, err := TransferClient(ctx, d)
