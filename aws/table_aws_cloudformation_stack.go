@@ -302,6 +302,9 @@ func listCloudFormationStacks(ctx context.Context, d *plugin.QueryData, _ *plugi
 //// HYDRATE FUNCTIONS
 
 func getCloudFormationStack(ctx context.Context, d *plugin.QueryData, h *plugin.HydrateData) (interface{}, error) {
+	if d.EqualsQuals["name"].GetStringValue() == "" && deletedStackSummary(h.Item) {
+		return nil, nil
+	}
 	// Create Session
 	svc, err := CloudFormationClient(ctx, d)
 	if err != nil {
@@ -339,7 +342,21 @@ func getCloudFormationStack(ctx context.Context, d *plugin.QueryData, h *plugin.
 	return nil, nil
 }
 
+// deletedStackSummary: the item is a listed stack that was deleted
+// (DELETE_COMPLETE). ListStacks lists deleted stacks for 90 days, but
+// DescribeStacks, GetTemplate and DescribeStackResources by stack name answer
+// ValidationError for them, which each call's ignore config ignores. So the
+// call is skipped: the row is the same (the listed columns only), with no
+// call. An account that deletes many stacks made one failing call per stack.
+func deletedStackSummary(item interface{}) bool {
+	s, ok := item.(types.StackSummary)
+	return ok && s.StackStatus == types.StackStatusDeleteComplete
+}
+
 func getStackTemplate(ctx context.Context, d *plugin.QueryData, h *plugin.HydrateData) (interface{}, error) {
+	if deletedStackSummary(h.Item) {
+		return nil, nil
+	}
 	stackName := ""
 
 	switch h.Item.(type) {
@@ -375,6 +392,9 @@ func getStackTemplate(ctx context.Context, d *plugin.QueryData, h *plugin.Hydrat
 }
 
 func describeStackResources(ctx context.Context, d *plugin.QueryData, h *plugin.HydrateData) (interface{}, error) {
+	if deletedStackSummary(h.Item) {
+		return nil, nil
+	}
 	stackName := ""
 
 	switch h.Item.(type) {
