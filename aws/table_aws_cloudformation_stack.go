@@ -344,10 +344,12 @@ func getCloudFormationStack(ctx context.Context, d *plugin.QueryData, h *plugin.
 
 // deletedStackSummary: the item is a listed stack that was deleted
 // (DELETE_COMPLETE). ListStacks lists deleted stacks for 90 days, but
-// DescribeStacks, GetTemplate and DescribeStackResources by stack name answer
-// ValidationError for them, which each call's ignore config ignores. So the
-// call is skipped: the row is the same (the listed columns only), with no
-// call. An account that deletes many stacks made one failing call per stack.
+// DescribeStacks, GetTemplate and DescribeStackResources look the stack up by
+// name: for a deleted stack they answer ValidationError (ignored by each
+// call's config), or, when a live stack has the same name now, they return
+// that live stack. So the calls are skipped: a deleted stack's row has the
+// listed columns only, never another stack's details. An account that deletes
+// many stacks made one failing call per deleted stack.
 func deletedStackSummary(item interface{}) bool {
 	s, ok := item.(types.StackSummary)
 	return ok && s.StackStatus == types.StackStatusDeleteComplete

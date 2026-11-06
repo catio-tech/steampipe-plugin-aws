@@ -2,7 +2,9 @@ package aws
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	cfntypes "github.com/aws/aws-sdk-go-v2/service/cloudformation/types"
@@ -12,10 +14,28 @@ import (
 	"github.com/turbot/steampipe-plugin-sdk/v6/plugin/context_key"
 )
 
+// isolatedContext keeps the test from reaching AWS: no shared config or
+// credentials, no instance metadata, and a deadline. A call that the code
+// under test should have skipped then fails fast with an error, never with a
+// real request or a hang.
+func isolatedContext(t *testing.T) context.Context {
+	t.Helper()
+	none := filepath.Join(t.TempDir(), "none")
+	t.Setenv("AWS_CONFIG_FILE", none)
+	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", none)
+	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
+	for _, k := range []string{"AWS_PROFILE", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_ROLE_ARN", "AWS_WEB_IDENTITY_TOKEN_FILE", "AWS_REGION", "AWS_DEFAULT_REGION"} {
+		t.Setenv(k, "")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	t.Cleanup(cancel)
+	return context.WithValue(ctx, context_key.Logger, hclog.NewNullLogger())
+}
+
 // A deleted stack's detail calls are skipped: no client, no call, no row
 // data. The calls of a stack that is not deleted are not skipped.
 func TestCloudFormationDeletedStackSkipsDetailCalls(t *testing.T) {
-	ctx := context.WithValue(context.Background(), context_key.Logger, hclog.NewNullLogger())
+	ctx := isolatedContext(t)
 	deleted := &plugin.HydrateData{Item: cfntypes.StackSummary{StackName: aws.String("gone"), StackStatus: cfntypes.StackStatusDeleteComplete}}
 	// No connection: a call would need a client, which this QueryData cannot
 	// give, so a nil, nil answer means that the call was skipped.
@@ -49,7 +69,7 @@ func TestCloudFormationDeletedStackSkipsDetailCalls(t *testing.T) {
 // Users are listed only on a server whose identity provider is SERVICE_MANAGED
 // (or not given).
 func TestTransferUsersOnlyOnServiceManagedServers(t *testing.T) {
-	ctx := context.WithValue(context.Background(), context_key.Logger, hclog.NewNullLogger())
+	ctx := isolatedContext(t)
 	for _, c := range []struct {
 		idp  transfertypes.IdentityProviderType
 		want bool
