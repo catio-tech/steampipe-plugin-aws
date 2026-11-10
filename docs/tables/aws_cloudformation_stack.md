@@ -14,6 +14,7 @@ The `aws_cloudformation_stack` table in Steampipe provides you with information 
 
 **Important Notes**
 - This table supports the optional list key column `status`.
+- Without a `status` qual the table leaves out deleted stacks (`DELETE_COMPLETE`). To list deleted stacks, use `status = 'DELETE_COMPLETE'`.
 - For supported values of the `status`, please refer [StackStatusFilter](https://docs.aws.amazon.com/AWSCloudFormation/latest/APIReference/API_ListStacks.html).
 
 ## Examples

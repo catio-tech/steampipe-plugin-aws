@@ -267,7 +267,8 @@ func listCloudFormationStacks(ctx context.Context, d *plugin.QueryData, _ *plugi
 	}
 
 	// We can not pass the MaxResult value in param so we can't limit the result per page
-	input := listStacksInput(d.EqualsQuals["status"].GetStringValue())
+	status := d.EqualsQuals["status"].GetStringValue()
+	input := listStacksInput(status)
 	paginator := cloudformation.NewListStacksPaginator(svc, input, func(o *cloudformation.ListStacksPaginatorOptions) {
 		o.StopOnDuplicateToken = true
 	})
@@ -282,6 +283,9 @@ func listCloudFormationStacks(ctx context.Context, d *plugin.QueryData, _ *plugi
 		}
 
 		for _, stack := range output.StackSummaries {
+			if !listedStack(status, stack) {
+				continue
+			}
 			d.StreamListItem(ctx, stack)
 			// Context can be cancelled due to manual cancellation or the limit has been hit
 			if d.RowsRemaining(ctx) == 0 {
@@ -294,23 +298,27 @@ func listCloudFormationStacks(ctx context.Context, d *plugin.QueryData, _ *plugi
 }
 
 // listStacksInput is the ListStacks input of a scan. With a `status` qual it
-// lists that status only. Without one it lists every status except
-// DELETE_COMPLETE: ListStacks lists deleted stacks for 90 days, a deleted stack
-// is not a resource of the account, and each listed row costs a rate-limiter
-// token for its detail calls even when the calls are skipped. An account that
-// deletes many stacks could not finish the scan in its time limit. A query
-// that wants deleted stacks names the status: `status = 'DELETE_COMPLETE'`.
+// lists that status only. Without one it sets no filter: listing "every status
+// but DELETE_COMPLETE" would need the SDK's list of statuses, and a status that
+// AWS adds before the SDK knows it would then hide live stacks with no error.
+// listedStack leaves the deleted stacks out instead.
 func listStacksInput(status string) *cloudformation.ListStacksInput {
 	if status != "" {
 		return &cloudformation.ListStacksInput{StackStatusFilter: []types.StackStatus{types.StackStatus(status)}}
 	}
-	var statuses []types.StackStatus
-	for _, s := range types.StackStatus("").Values() {
-		if s != types.StackStatusDeleteComplete {
-			statuses = append(statuses, s)
-		}
-	}
-	return &cloudformation.ListStacksInput{StackStatusFilter: statuses}
+	return &cloudformation.ListStacksInput{}
+}
+
+// listedStack reports whether a scan streams a listed stack. Without a
+// `status` qual it leaves out DELETE_COMPLETE: ListStacks lists deleted stacks
+// for 90 days, a deleted stack is not a resource of the account, and each
+// streamed row waits for a rate-limiter token for its detail calls even when
+// the calls are skipped, so an account that deletes many stacks could not
+// finish the scan in its time limit. A skipped summary is never streamed, so
+// it costs no token (the list pages still do, one per page). A query that
+// wants deleted stacks names the status: `status = 'DELETE_COMPLETE'`.
+func listedStack(status string, s types.StackSummary) bool {
+	return status != "" || s.StackStatus != types.StackStatusDeleteComplete
 }
 
 //// HYDRATE FUNCTIONS
