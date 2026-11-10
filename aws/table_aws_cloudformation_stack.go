@@ -267,13 +267,7 @@ func listCloudFormationStacks(ctx context.Context, d *plugin.QueryData, _ *plugi
 	}
 
 	// We can not pass the MaxResult value in param so we can't limit the result per page
-	input := &cloudformation.ListStacksInput{}
-
-	// Additonal Filter
-	equalQuals := d.EqualsQuals
-	if equalQuals["status"] != nil {
-		input.StackStatusFilter = []types.StackStatus{types.StackStatus(equalQuals["status"].GetStringValue())}
-	}
+	input := listStacksInput(d.EqualsQuals["status"].GetStringValue())
 	paginator := cloudformation.NewListStacksPaginator(svc, input, func(o *cloudformation.ListStacksPaginatorOptions) {
 		o.StopOnDuplicateToken = true
 	})
@@ -297,6 +291,26 @@ func listCloudFormationStacks(ctx context.Context, d *plugin.QueryData, _ *plugi
 
 	}
 	return nil, err
+}
+
+// listStacksInput is the ListStacks input of a scan. With a `status` qual it
+// lists that status only. Without one it lists every status except
+// DELETE_COMPLETE: ListStacks lists deleted stacks for 90 days, a deleted stack
+// is not a resource of the account, and each listed row costs a rate-limiter
+// token for its detail calls even when the calls are skipped. An account that
+// deletes many stacks could not finish the scan in its time limit. A query
+// that wants deleted stacks names the status: `status = 'DELETE_COMPLETE'`.
+func listStacksInput(status string) *cloudformation.ListStacksInput {
+	if status != "" {
+		return &cloudformation.ListStacksInput{StackStatusFilter: []types.StackStatus{types.StackStatus(status)}}
+	}
+	var statuses []types.StackStatus
+	for _, s := range types.StackStatus("").Values() {
+		if s != types.StackStatusDeleteComplete {
+			statuses = append(statuses, s)
+		}
+	}
+	return &cloudformation.ListStacksInput{StackStatusFilter: statuses}
 }
 
 //// HYDRATE FUNCTIONS
