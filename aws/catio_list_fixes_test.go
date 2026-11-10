@@ -94,3 +94,30 @@ func TestTransferUsersOnlyOnServiceManagedServers(t *testing.T) {
 		}
 	}
 }
+
+// A scan with no status qual lists every stack status except DELETE_COMPLETE;
+// a status qual lists that status only, DELETE_COMPLETE included.
+func TestCloudFormationListStacksInputLeavesOutDeletedStacks(t *testing.T) {
+	all := listStacksInput("")
+	if len(all.StackStatusFilter) != len(cfntypes.StackStatus("").Values())-1 {
+		t.Fatalf("no qual: %d statuses, want every status but one (%d)", len(all.StackStatusFilter), len(cfntypes.StackStatus("").Values())-1)
+	}
+	seen := map[cfntypes.StackStatus]bool{}
+	for _, s := range all.StackStatusFilter {
+		if s == cfntypes.StackStatusDeleteComplete {
+			t.Fatalf("no qual: the filter lists DELETE_COMPLETE")
+		}
+		seen[s] = true
+	}
+	for _, s := range []cfntypes.StackStatus{cfntypes.StackStatusCreateComplete, cfntypes.StackStatusUpdateComplete, cfntypes.StackStatusDeleteInProgress, cfntypes.StackStatusDeleteFailed, cfntypes.StackStatusRollbackComplete} {
+		if !seen[s] {
+			t.Errorf("no qual: the filter does not list %s", s)
+		}
+	}
+	for _, status := range []string{"DELETE_COMPLETE", "CREATE_COMPLETE"} {
+		in := listStacksInput(status)
+		if len(in.StackStatusFilter) != 1 || string(in.StackStatusFilter[0]) != status {
+			t.Errorf("qual %s: filter %v, want only %s", status, in.StackStatusFilter, status)
+		}
+	}
+}
