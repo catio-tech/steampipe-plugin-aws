@@ -95,29 +95,36 @@ func TestTransferUsersOnlyOnServiceManagedServers(t *testing.T) {
 	}
 }
 
-// A scan with no status qual lists every stack status except DELETE_COMPLETE;
-// a status qual lists that status only, DELETE_COMPLETE included.
-func TestCloudFormationListStacksInputLeavesOutDeletedStacks(t *testing.T) {
-	all := listStacksInput("")
-	if len(all.StackStatusFilter) != len(cfntypes.StackStatus("").Values())-1 {
-		t.Fatalf("no qual: %d statuses, want every status but one (%d)", len(all.StackStatusFilter), len(cfntypes.StackStatus("").Values())-1)
-	}
-	seen := map[cfntypes.StackStatus]bool{}
-	for _, s := range all.StackStatusFilter {
-		if s == cfntypes.StackStatusDeleteComplete {
-			t.Fatalf("no qual: the filter lists DELETE_COMPLETE")
-		}
-		seen[s] = true
-	}
-	for _, s := range []cfntypes.StackStatus{cfntypes.StackStatusCreateComplete, cfntypes.StackStatusUpdateComplete, cfntypes.StackStatusDeleteInProgress, cfntypes.StackStatusDeleteFailed, cfntypes.StackStatusRollbackComplete} {
-		if !seen[s] {
-			t.Errorf("no qual: the filter does not list %s", s)
-		}
+// A scan with no status qual sets no StackStatusFilter and leaves out the
+// DELETE_COMPLETE summaries as it streams them, so a status that the SDK does
+// not know yet is still listed; a status qual lists that status only,
+// DELETE_COMPLETE included.
+func TestCloudFormationListStacksLeavesOutDeletedStacks(t *testing.T) {
+	if f := listStacksInput("").StackStatusFilter; len(f) != 0 {
+		t.Fatalf("no qual: filter %v, want none", f)
 	}
 	for _, status := range []string{"DELETE_COMPLETE", "CREATE_COMPLETE"} {
 		in := listStacksInput(status)
 		if len(in.StackStatusFilter) != 1 || string(in.StackStatusFilter[0]) != status {
 			t.Errorf("qual %s: filter %v, want only %s", status, in.StackStatusFilter, status)
+		}
+	}
+	cases := []struct {
+		qual   string
+		status cfntypes.StackStatus
+		want   bool
+	}{
+		{"", cfntypes.StackStatusDeleteComplete, false},
+		{"", cfntypes.StackStatusCreateComplete, true},
+		{"", cfntypes.StackStatusDeleteInProgress, true},
+		{"", cfntypes.StackStatusDeleteFailed, true},
+		{"", cfntypes.StackStatus("SOME_STATUS_AWS_ADDS_LATER"), true},
+		{"DELETE_COMPLETE", cfntypes.StackStatusDeleteComplete, true},
+		{"CREATE_COMPLETE", cfntypes.StackStatusCreateComplete, true},
+	}
+	for _, c := range cases {
+		if got := listedStack(c.qual, cfntypes.StackSummary{StackStatus: c.status}); got != c.want {
+			t.Errorf("qual %q, status %s: listed %v, want %v", c.qual, c.status, got, c.want)
 		}
 	}
 }
